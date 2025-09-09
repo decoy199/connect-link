@@ -1,0 +1,13 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyc
+db.sqlite3
+backend/db.sqlite3
+backend/**/__pycache__/
+
+# Node / React（必要なら）
+node_modules/
+dist/
+build/
+*.log

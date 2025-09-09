@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, re_path
 from . import views
 
 urlpatterns = [
@@ -39,4 +39,8 @@ urlpatterns = [
     path('auth/forgot-password', views.forgot_password),
     path('auth/reset-password', views.reset_password),
     path('auth/forgot-username', views.forgot_username),
+
+    re_path(r'^auth/registration/?$', views.register),
+    re_path(r'^register/?$', views.register),
+    re_path(r'^auth/register/?$', views.register),
 ]

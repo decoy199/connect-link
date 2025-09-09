@@ -42,13 +42,30 @@ def _token_for_user(user):
 @permission_classes([AllowAny])
 def register(request):
     data = request.data
-    username = data.get('username')
+
+    # --- username 省略時は email から生成してユニーク化（既存仕様を保持しつつ拡張） ---
+    username_raw = (data.get('username') or '').strip()
     password = data.get('password')
-    email = data.get('email', '')
-    if not username or not password:
+    email = (data.get('email', '') or '').strip().lower()
+
+    if not password:
         return Response({'detail': 'username and password required'}, status=400)
-    if User.objects.filter(username=username).exists():
-        return Response({'detail': 'username already exists'}, status=400)
+
+    if username_raw:
+        if User.objects.filter(username=username_raw).exists():
+            return Response({'detail': 'username already exists'}, status=400)
+        username = username_raw
+    else:
+        base = email.split('@')[0].strip() if email else ''
+        if not base:
+            return Response({'detail': 'username and password required'}, status=400)
+        candidate = base
+        counter = 0
+        while User.objects.filter(username=candidate).exists():
+            counter += 1
+            candidate = f"{base}{counter}"
+        username = candidate
+    # --- ここまで ---
 
     user = User.objects.create_user(username=username, password=password, email=email)
     profile = user.profile
@@ -57,7 +74,31 @@ def register(request):
     profile.years_experience = int(data.get('years_experience', 0) or 0)
     profile.avatar_url = data.get('avatar_url', '')
     profile.save()
-    return Response({'token': _token_for_user(user)})
+
+    # --- 追加: サインアップ直後に JWT を発行して HttpOnly クッキーに格納（自動ログイン扱い） ---
+    tokens = _token_for_user(user)
+    resp = Response({'token': tokens}, status=201)
+    # ローカル開発想定。必要に応じて Secure=True/SameSite を環境で切替えてください
+    resp.set_cookie(
+        key='access',
+        value=tokens['access'],
+        httponly=True,
+        secure=False,
+        samesite='Lax',
+        max_age=60 * 60,  # 1h 目安
+        path='/'
+    )
+    resp.set_cookie(
+        key='refresh',
+        value=tokens['refresh'],
+        httponly=True,
+        secure=False,
+        samesite='Lax',
+        max_age=60 * 60 * 24 * 7,  # 7d 目安
+        path='/'
+    )
+    return resp
+    # --- 追加ここまで ---
 
 
 @api_view(['POST'])
@@ -68,7 +109,12 @@ def login_jwt(request):
     user = authenticate(username=username, password=password)
     if not user:
         return Response({'detail': 'Invalid credentials'}, status=400)
-    return Response({'token': _token_for_user(user)})
+    # 任意: ログイン時もクッキーへ。既存動作を維持したい場合は下をコメントアウト可
+    tokens = _token_for_user(user)
+    resp = Response({'token': tokens})
+    resp.set_cookie('access', tokens['access'], httponly=True, secure=False, samesite='Lax', max_age=60*60, path='/')
+    resp.set_cookie('refresh', tokens['refresh'], httponly=True, secure=False, samesite='Lax', max_age=60*60*24*7, path='/')
+    return resp
 
 
 @api_view(['GET', 'PUT'])

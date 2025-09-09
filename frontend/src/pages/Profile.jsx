@@ -31,16 +31,21 @@ export default function Profile() {
     const load = async () => {
       try {
         const { data } = await api.get('/me')
+        const u = data?.user ?? data // user ネスト or トップレベル どちらでも対応
+  
         setForm({
-          first_name: data?.user?.first_name || '',
-          last_name: data?.user?.last_name || '',
-          department: data.department || '',
-          position: data.position || '',
-          bio: data.bio || '',
-          hobbies: data.hobbies || '',
-          years_experience: data.years_experience || 0,
-          avatar_url: data.avatar_url || '',
-          expertise: (data.expertise || []).map(t => t.name).join(', ')
+          first_name: u?.first_name ?? u?.firstName ?? '',
+          last_name:  u?.last_name  ?? u?.lastName  ?? '',
+          department: data?.department ?? u?.department ?? '',
+          position:   data?.position   ?? u?.position   ?? '',
+          bio:        data?.bio        ?? u?.bio        ?? '',
+          hobbies:    data?.hobbies    ?? u?.hobbies    ?? '',
+          years_experience: Number(data?.years_experience ?? u?.years_experience ?? 0),
+          avatar_url: data?.avatar_url ?? u?.avatar_url ?? '',
+          expertise:  (data?.expertise ?? u?.expertise ?? [])
+                        .map(t => (typeof t === 'string' ? t : t?.name))
+                        .filter(Boolean)
+                        .join(', ')
         })
         setErr('')
       } catch (e) {
@@ -49,6 +54,20 @@ export default function Profile() {
     }
     load()
   }, [])
+  
+
+  const body = {
+    firstName: form.first_name,
+    lastName: form.last_name,
+    department: form.department,
+    position: form.position,
+    bio: form.bio,
+    hobbies: form.hobbies,
+    yearsExperience: Number(form.years_experience || 0),
+    avatarUrl: form.avatar_url,
+    expertise: form.expertise.split(',').map(s => s.trim()).filter(Boolean),
+  }
+  
 
   const save = async () => {
     try {
