@@ -1,182 +1,249 @@
+// src/pages/SignUp.jsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import api from '../lib/api'; // Assuming existing axios instance
+import { useNavigate, Link } from 'react-router-dom';
+import api from '../api';
 
-function SignUp() {
+export default function SignUp() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     email: '',
     password: '',
     confirmPassword: '',
+    first_name: '',
+    last_name: '',
     department: '',
     position: '',
     years_experience: '',
-    avatar_url: ''
+    expertise_hashtags: '', // comma-separated: "python, react, ml"
   });
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [err, setErr] = useState('');
 
-  const onChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-  };
+  const onChange = (e) =>
+    setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
-  const handleSubmit = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    setError('');
+    setErr('');
 
-    if (!form.email || !form.password) {
-      setError('Email and Password are required');
-      return;
-    }
     if (form.password !== form.confirmPassword) {
-      setError('Password and confirmation do not match');
+      setErr('Passwords do not match');
       return;
     }
 
     setSubmitting(true);
     try {
-      const usernameFromEmail = (form.email.split('@')[0] || '').trim();
+      const tags = form.expertise_hashtags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
       const payload = {
         email: form.email.trim(),
         password: form.password,
-        // Username can be omitted, but we send it explicitly (server also supports auto-generation when omitted)
-        username: usernameFromEmail,
-        department: form.department,
-        position: form.position,
-        years_experience: form.years_experience ? Number(form.years_experience) : 0,
-        avatar_url: form.avatar_url
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        department: form.department.trim(),
+        position: form.position.trim(),
+        years_experience: form.years_experience
+          ? Number(form.years_experience)
+          : 0,
+        expertise_hashtags: tags,
       };
 
-      // No trailing slash: /auth/register
-      const res = await api.post('/auth/register', payload);
+      const res = await api.post('/register', payload);
 
-      // --- Auto-login ---
-      // Server also sets HttpOnly cookies; we additionally store tokens in localStorage for client use.
-      const tokens = res?.data?.token || null;
-      if (tokens && tokens.access) {
-        try {
-          localStorage.setItem('accessToken', tokens.access);
-          localStorage.setItem('refreshToken', tokens.refresh || '');
-        } catch (_) {
-          // Even if localStorage fails, HttpOnly cookies still work.
-        }
-      }
-
-      // Optionally add default Authorization header for axios
+      // Auto-login on success (align with app’s getToken() which reads "token")
+      const tokens = res?.data?.token;
       if (tokens?.access) {
-        api.defaults.headers.common['Authorization'] = `Bearer ${tokens.access}`;
+        localStorage.setItem('token', tokens.access);
+        api.defaults.headers.common.Authorization = `Bearer ${tokens.access}`;
       }
 
-      // --- Navigate to Home ---
+      // Go to home page (change to '/dashboard' if that’s your home)
       navigate('/', { replace: true });
-      // Or if you prefer a full reload:
-      // window.location.replace('/');
-
-    } catch (err) {
-      const msg =
-        err?.response?.data?.detail ||
-        err?.response?.data?.message ||
-        'signup failed';
-      setError(String(msg));
+    } catch (ex) {
+      setErr(ex.response?.data?.detail || 'Sign up failed');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const inputCls =
+    'w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500';
+
   return (
-    <div className="container" style={{ maxWidth: 520, margin: '40px auto' }}>
-      <h1>Sign Up</h1>
-      {error ? (
-        <div style={{ background: '#fee', border: '1px solid #f99', padding: 12, marginBottom: 16 }}>
-          {error}
-        </div>
-      ) : null}
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 12 }}>
-          <label>Email</label>
+    <div className="max-w-xl mx-auto mt-10 p-6 bg-white rounded-2xl shadow">
+      <h1 className="text-2xl font-semibold mb-6">Sign Up</h1>
+
+      {err && <p className="mb-4 text-sm text-red-600">{err}</p>}
+
+      <form onSubmit={submit} className="space-y-4">
+        <div>
+          <label htmlFor="email" className="block text-sm font-medium mb-1">
+            Email
+          </label>
           <input
+            id="email"
             name="email"
             type="email"
+            className={inputCls}
             value={form.email}
             onChange={onChange}
             required
-            style={{ width: '100%' }}
-            autoComplete="email"
           />
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Password</label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="first_name"
+              className="block text-sm font-medium mb-1"
+            >
+              First Name
+            </label>
+            <input
+              id="first_name"
+              name="first_name"
+              className={inputCls}
+              value={form.first_name}
+              onChange={onChange}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="last_name"
+              className="block text-sm font-medium mb-1"
+            >
+              Last Name
+            </label>
+            <input
+              id="last_name"
+              name="last_name"
+              className={inputCls}
+              value={form.last_name}
+              onChange={onChange}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium mb-1">
+            Password
+          </label>
           <input
+            id="password"
             name="password"
             type="password"
+            className={inputCls}
             value={form.password}
             onChange={onChange}
             required
-            style={{ width: '100%' }}
-            autoComplete="new-password"
           />
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Confirm Password</label>
+
+        <div>
+          <label
+            htmlFor="confirmPassword"
+            className="block text-sm font-medium mb-1"
+          >
+            Confirm Password
+          </label>
           <input
+            id="confirmPassword"
             name="confirmPassword"
             type="password"
+            className={inputCls}
             value={form.confirmPassword}
             onChange={onChange}
             required
-            style={{ width: '100%' }}
-            autoComplete="new-password"
           />
         </div>
 
-        <hr style={{ margin: '16px 0' }} />
+        <hr className="my-2" />
 
-        <div style={{ marginBottom: 12 }}>
-          <label>Department</label>
+        <div>
+          <label
+            htmlFor="department"
+            className="block text-sm font-medium mb-1"
+          >
+            Department
+          </label>
           <input
+            id="department"
             name="department"
+            className={inputCls}
             value={form.department}
             onChange={onChange}
-            style={{ width: '100%' }}
           />
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Position</label>
+
+        <div>
+          <label htmlFor="position" className="block text-sm font-medium mb-1">
+            Position
+          </label>
           <input
+            id="position"
             name="position"
+            className={inputCls}
             value={form.position}
             onChange={onChange}
-            style={{ width: '100%' }}
           />
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Years of Experience</label>
+
+        <div>
+          <label
+            htmlFor="years_experience"
+            className="block text-sm font-medium mb-1"
+          >
+            Years of Experience
+          </label>
           <input
+            id="years_experience"
             name="years_experience"
             type="number"
             min="0"
+            className={inputCls}
             value={form.years_experience}
             onChange={onChange}
-            style={{ width: '100%' }}
-          />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label>Avatar URL</label>
-          <input
-            name="avatar_url"
-            value={form.avatar_url}
-            onChange={onChange}
-            style={{ width: '100%' }}
           />
         </div>
 
-        <button type="submit" disabled={submitting} style={{ padding: '10px 16px' }}>
+        <div>
+          <label
+            htmlFor="expertise_hashtags"
+            className="block text-sm font-medium mb-1"
+          >
+            Expertise Hashtags
+          </label>
+          <input
+            id="expertise_hashtags"
+            name="expertise_hashtags"
+            placeholder="e.g., python, react, ml"
+            className={inputCls}
+            value={form.expertise_hashtags}
+            onChange={onChange}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Separate multiple items with commas.
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full bg-blue-600 text-white py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50"
+        >
           {submitting ? 'Signing up…' : 'Sign Up'}
         </button>
       </form>
+
+      <p className="text-sm text-gray-500 mt-4">
+        Already have an account?{' '}
+        <Link to="/login" className="underline">
+          Log in
+        </Link>
+      </p>
     </div>
   );
 }
-
-export default SignUp;

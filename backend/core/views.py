@@ -1,13 +1,27 @@
-from django.contrib.auth.models import User
-from django.contrib.auth import authenticate
-from django.db.models import Q, Sum, Case, When, IntegerField, Value
-from django.utils import timezone
 from datetime import timedelta
+from io import BytesIO
+import base64
+import json
+
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.db.models import Q, Sum, Case, When, IntegerField, Value
+from django.http import JsonResponse
+from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.views.decorators.csrf import csrf_exempt
+
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+
+import qrcode
+
 from .models import (
     Tag, Question, Answer, PointTransaction, Notification, ChatLog,
     award_points, within_week
@@ -16,21 +30,8 @@ from .serializers import (
     UserProfileSerializer, TagSerializer, QuestionSerializer,
     AnswerSerializer, PointTransactionSerializer, NotificationSerializer
 )
-import qrcode
-from io import BytesIO
-import base64
 
-
-from django.contrib.auth.models import User
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_str
-from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import send_mail
-import json
-
-FRONTEND_BASE_URL = "http://localhost:5175" 
+FRONTEND_BASE_URL = "http://localhost:5175"
 
 
 def _token_for_user(user):
@@ -41,9 +42,13 @@ def _token_for_user(user):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
+    """
+    Create user, set profile fields, attach expertise hashtags,
+    and immediately issue JWT (auto-login).
+    """
     data = request.data
 
-    # --- username 省略時は email から生成してユニーク化（既存仕様を保持しつつ拡張） ---
+    # Username generation (if omitted) – keep existing behavior
     username_raw = (data.get('username') or '').strip()
     password = data.get('password')
     email = (data.get('email', '') or '').strip().lower()
@@ -65,27 +70,46 @@ def register(request):
             counter += 1
             candidate = f"{base}{counter}"
         username = candidate
-    # --- ここまで ---
 
+    # Create user and set names
     user = User.objects.create_user(username=username, password=password, email=email)
+    user.first_name = (data.get('first_name') or '').strip()
+    user.last_name = (data.get('last_name') or '').strip()
+    user.save()
+
+    # Profile fields
     profile = user.profile
     profile.department = data.get('department', '')
     profile.position = data.get('position', '')
     profile.years_experience = int(data.get('years_experience', 0) or 0)
-    profile.avatar_url = data.get('avatar_url', '')
+    # Avatar URL is no longer used; keep empty for backward compatibility
+    profile.avatar_url = ''
     profile.save()
 
-    # --- 追加: サインアップ直後に JWT を発行して HttpOnly クッキーに格納（自動ログイン扱い） ---
+    # Expertise hashtags: list or comma-separated string
+    raw_tags = data.get('expertise_hashtags', [])
+    if isinstance(raw_tags, str):
+        raw_tags = [t.strip() for t in raw_tags.split(',')]
+    names = [t.strip().lstrip('#').lower() for t in raw_tags if t and t.strip()]
+    if names:
+        tag_objs = []
+        # Preserve order & remove dups
+        for nm in dict.fromkeys(names):
+            tag, _ = Tag.objects.get_or_create(name=nm)
+            tag_objs.append(tag)
+        profile.expertise.set(tag_objs)
+        profile.save()
+
+    # Issue JWT and set cookies (auto-login)
     tokens = _token_for_user(user)
     resp = Response({'token': tokens}, status=201)
-    # ローカル開発想定。必要に応じて Secure=True/SameSite を環境で切替えてください
     resp.set_cookie(
         key='access',
         value=tokens['access'],
         httponly=True,
         secure=False,
         samesite='Lax',
-        max_age=60 * 60,  # 1h 目安
+        max_age=60 * 60,
         path='/'
     )
     resp.set_cookie(
@@ -94,11 +118,10 @@ def register(request):
         httponly=True,
         secure=False,
         samesite='Lax',
-        max_age=60 * 60 * 24 * 7,  # 7d 目安
+        max_age=60 * 60 * 24 * 7,
         path='/'
     )
     return resp
-    # --- 追加ここまで ---
 
 
 @api_view(['POST'])
@@ -109,7 +132,6 @@ def login_jwt(request):
     user = authenticate(username=username, password=password)
     if not user:
         return Response({'detail': 'Invalid credentials'}, status=400)
-    # 任意: ログイン時もクッキーへ。既存動作を維持したい場合は下をコメントアウト可
     tokens = _token_for_user(user)
     resp = Response({'token': tokens})
     resp.set_cookie('access', tokens['access'], httponly=True, secure=False, samesite='Lax', max_age=60*60, path='/')
@@ -124,15 +146,15 @@ def me(request):
     PUT: update profile fields and user.first_name/last_name.
     """
     if request.method == 'GET':
-        payload = UserProfileSerializer(request.user.profile).data
-        user_blk = payload.get('user') or {}
-        user_blk.update({
-            'username': request.user.username,
-            'first_name': request.user.first_name or '',
-            'last_name' : request.user.last_name or ''
-        })
-        payload['user'] = user_blk
-        return Response(payload)
+      payload = UserProfileSerializer(request.user.profile).data
+      user_blk = payload.get('user') or {}
+      user_blk.update({
+          'username': request.user.username,
+          'first_name': request.user.first_name or '',
+          'last_name': request.user.last_name or ''
+      })
+      payload['user'] = user_blk
+      return Response(payload)
 
     p = request.user.profile
     p.department = request.data.get('department', p.department)
@@ -140,6 +162,7 @@ def me(request):
     p.bio        = request.data.get('bio', p.bio)
     p.hobbies    = request.data.get('hobbies', p.hobbies)
     p.years_experience = int(request.data.get('years_experience', p.years_experience))
+    # Avatar kept for backward compatibility; ignore if not provided
     p.avatar_url = request.data.get('avatar_url', p.avatar_url)
 
     tags = request.data.get('expertise', [])
@@ -172,7 +195,7 @@ def tags(request):
 
 
 # ---- 24h auto-bonus helper ----------------------------------------------------
-def _maybe_auto_award(q: Question):
+def _maybe_auto_award(q: "Question"):
     if q.auto_awarded or q.best_answer_id:
         return
     if timezone.now() - q.created_at < timedelta(hours=24):
@@ -183,7 +206,7 @@ def _maybe_auto_award(q: Question):
         q.save(update_fields=['auto_awarded'])
         return
 
-    def key(a: Answer):
+    def key(a: "Answer"):
         likes = a.likes.count()
         yexp = a.author.profile.years_experience if a.author and hasattr(a.author, 'profile') else 0
         return (likes, yexp, -a.id)
@@ -465,6 +488,7 @@ def leaderboard(request):
 def _json(request):
     return json.loads(request.body.decode('utf-8') or "{}")
 
+
 @csrf_exempt
 def forgot_password(request):
     if request.method != "POST":
@@ -491,6 +515,7 @@ def forgot_password(request):
     print("DEV reset link:", reset_link)  # helpful in dev
     return JsonResponse({"ok": True})
 
+
 @csrf_exempt
 def reset_password(request):
     if request.method != "POST":
@@ -515,6 +540,7 @@ def reset_password(request):
     user.set_password(new_password)
     user.save()
     return JsonResponse({"ok": True})
+
 
 @csrf_exempt
 def forgot_username(request):
