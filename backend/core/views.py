@@ -2,6 +2,7 @@ from datetime import timedelta
 from io import BytesIO
 import base64
 import json
+import re
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -24,7 +25,7 @@ import qrcode
 
 from .models import (
     Tag, Question, Answer, PointTransaction, Notification, ChatLog,
-    award_points, within_week
+    award_points, within_week, DirectQuestion
 )
 from .serializers import (
     UserProfileSerializer, TagSerializer, QuestionSerializer,
@@ -39,6 +40,8 @@ def _token_for_user(user):
     return {'access': str(refresh.access_token), 'refresh': str(refresh)}
 
 
+# ------------------------ Auth ------------------------
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
@@ -48,7 +51,6 @@ def register(request):
     """
     data = request.data
 
-    # Username generation (if omitted) – keep existing behavior
     username_raw = (data.get('username') or '').strip()
     password = data.get('password')
     email = (data.get('email', '') or '').strip().lower()
@@ -82,45 +84,27 @@ def register(request):
     profile.department = data.get('department', '')
     profile.position = data.get('position', '')
     profile.years_experience = int(data.get('years_experience', 0) or 0)
-    # Avatar URL is no longer used; keep empty for backward compatibility
+    # Avatar URL kept for compatibility
     profile.avatar_url = ''
     profile.save()
 
-    # Expertise hashtags: list or comma-separated string
+    # Expertise hashtags
     raw_tags = data.get('expertise_hashtags', [])
     if isinstance(raw_tags, str):
         raw_tags = [t.strip() for t in raw_tags.split(',')]
     names = [t.strip().lstrip('#').lower() for t in raw_tags if t and t.strip()]
     if names:
         tag_objs = []
-        # Preserve order & remove dups
         for nm in dict.fromkeys(names):
             tag, _ = Tag.objects.get_or_create(name=nm)
             tag_objs.append(tag)
         profile.expertise.set(tag_objs)
         profile.save()
 
-    # Issue JWT and set cookies (auto-login)
     tokens = _token_for_user(user)
     resp = Response({'token': tokens}, status=201)
-    resp.set_cookie(
-        key='access',
-        value=tokens['access'],
-        httponly=True,
-        secure=False,
-        samesite='Lax',
-        max_age=60 * 60,
-        path='/'
-    )
-    resp.set_cookie(
-        key='refresh',
-        value=tokens['refresh'],
-        httponly=True,
-        secure=False,
-        samesite='Lax',
-        max_age=60 * 60 * 24 * 7,
-        path='/'
-    )
+    resp.set_cookie('access', tokens['access'], httponly=True, secure=False, samesite='Lax', max_age=60*60, path='/')
+    resp.set_cookie('refresh', tokens['refresh'], httponly=True, secure=False, samesite='Lax', max_age=60*60*24*7, path='/')
     return resp
 
 
@@ -146,15 +130,15 @@ def me(request):
     PUT: update profile fields and user.first_name/last_name.
     """
     if request.method == 'GET':
-      payload = UserProfileSerializer(request.user.profile).data
-      user_blk = payload.get('user') or {}
-      user_blk.update({
-          'username': request.user.username,
-          'first_name': request.user.first_name or '',
-          'last_name': request.user.last_name or ''
-      })
-      payload['user'] = user_blk
-      return Response(payload)
+        payload = UserProfileSerializer(request.user.profile).data
+        user_blk = payload.get('user') or {}
+        user_blk.update({
+            'username': request.user.username,
+            'first_name': request.user.first_name or '',
+            'last_name': request.user.last_name or ''
+        })
+        payload['user'] = user_blk
+        return Response(payload)
 
     p = request.user.profile
     p.department = request.data.get('department', p.department)
@@ -162,7 +146,6 @@ def me(request):
     p.bio        = request.data.get('bio', p.bio)
     p.hobbies    = request.data.get('hobbies', p.hobbies)
     p.years_experience = int(request.data.get('years_experience', p.years_experience))
-    # Avatar kept for backward compatibility; ignore if not provided
     p.avatar_url = request.data.get('avatar_url', p.avatar_url)
 
     tags = request.data.get('expertise', [])
@@ -189,21 +172,25 @@ def me(request):
     return Response(payload)
 
 
+# ------------------------ Tags ------------------------
+
 @api_view(['GET'])
 def tags(request):
     return Response(TagSerializer(Tag.objects.all(), many=True).data)
 
 
-# ---- 24h auto-bonus helper ----------------------------------------------------
+# ------------------------ Auto award helper ------------------------
+
 def _maybe_auto_award(q: "Question"):
-    if q.auto_awarded or q.best_answer_id:
+    if getattr(q, 'auto_awarded', False) or getattr(q, 'best_answer_id', None):
         return
     if timezone.now() - q.created_at < timedelta(hours=24):
         return
     answers = list(q.answers.all())
     if not answers:
-        q.auto_awarded = True
-        q.save(update_fields=['auto_awarded'])
+        if hasattr(q, 'auto_awarded'):
+            q.auto_awarded = True
+            q.save(update_fields=['auto_awarded'])
         return
 
     def key(a: "Answer"):
@@ -214,12 +201,26 @@ def _maybe_auto_award(q: "Question"):
     winner = max(answers, key=key)
     if winner.author:
         award_points(winner.author, 10, '24h top-liked answer bonus')
-    q.auto_awarded = True
-    q.save(update_fields=['auto_awarded'])
 
+    if hasattr(q, 'auto_awarded'):
+        q.auto_awarded = True
+        q.save(update_fields=['auto_awarded'])
+
+
+# ------------------------ Questions (list/create) ------------------------
 
 @api_view(['GET', 'POST'])
 def questions(request):
+    """
+    GET: list public questions
+      - optional ?tag=tagname
+    POST: create a public question
+      - accepts optional recipient_id to assign a single answerer
+      - Anyone can view; only assigned user can answer
+      - Notifications:
+          * urgent + tags -> expertise-matched users
+          * assigned recipient -> “You were assigned …”
+    """
     if request.method == 'GET':
         qset = Question.objects.all().order_by('-created_at')
         tag = request.GET.get('tag')
@@ -229,39 +230,80 @@ def questions(request):
             _maybe_auto_award(q)
         return Response(QuestionSerializer(qset, many=True).data)
 
+    # POST
     data = request.data
+    title = (data.get('title') or '').strip()
+    body  = (data.get('body') or '').strip()
+    urgent = bool(data.get('urgent', False))
+    tags_in = data.get('tags', [])
+    recipient_id = data.get('recipient_id')
+
+    if not title:
+        return Response({'detail': 'Title is required'}, status=400)
+
     q = Question.objects.create(
         author=request.user,
-        title=data.get('title', ''),
-        body=data.get('body', ''),
-        urgent=bool(data.get('urgent', False)),
+        title=title,
+        body=body,
+        urgent=urgent,
     )
-    for t in data.get('tags', []):
-        tag, _ = Tag.objects.get_or_create(name=t.strip().lstrip('#'))
-        q.tags.add(tag)
+
+    # tags
+    if isinstance(tags_in, list):
+        for t in tags_in:
+            tname = str(t).strip().lstrip('#')
+            if not tname:
+                continue
+            tag, _ = Tag.objects.get_or_create(name=tname)
+            q.tags.add(tag)
+    elif isinstance(tags_in, str):
+        for raw in [s.strip() for s in tags_in.split(',') if s.strip()]:
+            tname = raw.lstrip('#')
+            tag, _ = Tag.objects.get_or_create(name=tname)
+            q.tags.add(tag)
     q.save()
     award_points(request.user, 5, 'Posted a question')
 
-    notified_user_count = 0
-    if q.urgent:
+    # Optional: assigned answerer
+    assigned_user = None
+    if recipient_id:
+        try:
+            assigned_user = User.objects.get(id=int(recipient_id))
+            if hasattr(q, 'assigned_answerer'):
+                q.assigned_answerer = assigned_user
+                q.save(update_fields=['assigned_answerer'])
+        except Exception:
+            assigned_user = None
+
+    # Notifications
+    # 1) urgent + tags => expertise match
+    if urgent:
         tag_names = list(q.tags.values_list('name', flat=True))
-        match = Q()
-        for name in tag_names:
-            match |= Q(profile__expertise__name__iexact=name)
-        users = User.objects.filter(match).exclude(id=request.user.id).distinct()
-        notified_user_count = users.count()
-        for u in users:
-            Notification.objects.create(
-                user=u,
-                message=f"URGENT: {q.title} (tags: {', '.join(tag_names)})",
-                question=q,
-            )
+        if tag_names:
+            match = Q()
+            for name in tag_names:
+                match |= Q(profile__expertise__name__iexact=name)
+            users = User.objects.filter(match).exclude(id=request.user.id).distinct()
+            for u in users:
+                Notification.objects.create(
+                    user=u,
+                    message=f"URGENT: {q.title} (tags: {', '.join(tag_names)})",
+                    question=q,
+                )
+
+    # 2) assigned recipient gets private-style notification
+    if assigned_user:
+        Notification.objects.create(
+            user=assigned_user,
+            message=f"You were assigned to answer: {q.title}",
+            question=q,
+        )
 
     data_out = QuestionSerializer(q).data
-    if q.urgent:
-        data_out['notified_user_count'] = notified_user_count
     return Response(data_out, status=201)
 
+
+# ------------------------ Question detail (get/delete) ------------------------
 
 @api_view(['GET', 'DELETE'])
 def question_detail(request, qid):
@@ -282,6 +324,8 @@ def question_detail(request, qid):
     return Response(status=204)
 
 
+# ------------------------ Question suggest ------------------------
+
 @api_view(['GET'])
 def question_suggest(request):
     title = request.GET.get('title', '')
@@ -291,27 +335,52 @@ def question_suggest(request):
     return Response(list(qs))
 
 
+# ------------------------ Answers (list/create) ------------------------
+
 @api_view(['GET', 'POST'])
 def answers(request, qid):
     try:
         q = Question.objects.get(id=qid)
     except Question.DoesNotExist:
         return Response({'detail': 'Not found'}, status=404)
+
     if request.method == 'GET':
         _maybe_auto_award(q)
         return Response(AnswerSerializer(q.answers.all().order_by('-created_at'), many=True).data)
+
+    # Only assigned recipient can answer (if set)
+    assigned_id = getattr(q, 'assigned_answerer_id', None)
+    if assigned_id and request.user.id != assigned_id:
+        return Response({'detail': 'Only the assigned recipient can answer this question.'}, status=403)
+
+    # Optional rule: one answer per user
     if Answer.objects.filter(question=q, author=request.user).exists():
         return Response({'detail': 'You already answered this question'}, status=400)
-    a = Answer.objects.create(question=q, author=request.user, body=request.data.get('body', ''))
+
+    body = (request.data.get('body') or '').strip()
+    if not body:
+        return Response({'detail': 'Answer body is required'}, status=400)
+
+    a = Answer.objects.create(question=q, author=request.user, body=body)
     award_points(request.user, 10, 'Answered a question')
+
+    # Notify question author
+    if q.author_id and q.author_id != request.user.id:
+        Notification.objects.create(
+            user=q.author,
+            message=f"New answer to: {q.title}",
+            question=q,
+        )
+
     return Response(AnswerSerializer(a).data, status=201)
 
+
+# ------------------------ Answer update/delete ------------------------
 
 @api_view(['PUT', 'DELETE'])
 def answer_detail(request, aid):
     """
     Edit or delete an answer within 30 minutes of creation; only by the author.
-    PUT body: {"body": "<new text>"}
     """
     try:
         a = Answer.objects.select_related('author').get(id=aid)
@@ -328,7 +397,6 @@ def answer_detail(request, aid):
         a.delete()
         return Response(status=204)
 
-    # PUT
     new_body = (request.data.get('body') or '').strip()
     if not new_body:
         return Response({'detail': 'Body is required'}, status=400)
@@ -336,6 +404,8 @@ def answer_detail(request, aid):
     a.save(update_fields=['body'])
     return Response(AnswerSerializer(a).data)
 
+
+# ------------------------ Like / Mark best ------------------------
 
 @api_view(['POST'])
 def like_answer(request, aid):
@@ -360,9 +430,17 @@ def mark_best(request, aid):
         return Response({'detail': 'Only the asker can select best answer'}, status=403)
     q.best_answer = a
     q.save(update_fields=['best_answer'])
-    award_points(a.author, 20, 'Best answer selected')
+    if a.author:
+        award_points(a.author, 20, 'Best answer selected')
+        Notification.objects.create(
+            user=a.author,
+            message=f"Your answer was marked as best: {q.title}",
+            question=q,
+        )
     return Response({'best_answer_id': a.id})
 
+
+# ------------------------ Points / QR ------------------------
 
 @api_view(['GET'])
 def points_balance(request):
@@ -392,6 +470,8 @@ def redeem_qr(request):
     return Response({'qr_data_url': f'data:image/png;base64,{b64}', 'payload': payload})
 
 
+# ------------------------ 1:1 Chat log (kept) ------------------------
+
 @api_view(['POST'])
 def log_chat(request):
     other_username = request.data.get('other')
@@ -409,53 +489,85 @@ def log_chat(request):
     return Response({'status': 'ok'})
 
 
+# ------------------------ Search (enhanced) ------------------------
+
+TAG_RE = re.compile(r"#([\w-]+)")
+AT_RE  = re.compile(r"@([\w.-]+)")
+
+def _user_brief(u: User):
+    p = getattr(u, 'profile', None)
+    return {
+        'id': u.id,
+        'username': u.username,
+        'name': (f"{u.first_name} {u.last_name}".strip() or u.username),
+        'department': getattr(p, 'department', '') or '',
+        'years_experience': getattr(p, 'years_experience', 0) or 0,
+    }
+
+
 @api_view(['GET'])
 def search(request):
     qraw = (request.GET.get('q') or '').strip()
     if not qraw:
         return Response({'people': [], 'questions': []})
-    q = qraw.lstrip('#')
 
-    questions = (Question.objects
-                 .filter(Q(title__icontains=q) | Q(body__icontains=q) | Q(tags__name__icontains=q))
-                 .distinct()
-                 .order_by('-created_at'))
+    tag_tokens = TAG_RE.findall(qraw)
+    at_tokens  = AT_RE.findall(qraw)
+
+    cleaned = qraw
+    for t in tag_tokens:
+        cleaned = cleaned.replace(f"#{t}", " ")
+    for a in at_tokens:
+        cleaned = cleaned.replace(f"@{a}", " ")
+    keywords = [s for s in re.split(r"\s+", cleaned.strip()) if s]
+
+    # People search
+    people_q = Q()
+    for at in at_tokens:
+        people_q |= Q(username__iexact=at) | Q(username__istartswith=at)
+    for kw in keywords:
+        people_q |= Q(username__icontains=kw) | Q(first_name__icontains=kw) | Q(last_name__icontains=kw)
+    if tag_tokens:
+        people_q |= Q(profile__expertise__name__in=tag_tokens)
 
     priority = Case(
-        When(username__iexact=q, then=Value(0)),
-        When(username__istartswith=q, then=Value(1)),
-        When(first_name__iexact=q, then=Value(2)),
-        When(last_name__iexact=q, then=Value(2)),
-        When(first_name__istartswith=q, then=Value(3)),
-        When(last_name__istartswith=q, then=Value(3)),
-        When(profile__expertise__name__iexact=q, then=Value(4)),
-        When(Q(username__icontains=q) | Q(first_name__icontains=q) | Q(last_name__icontains=q) |
-             Q(profile__expertise__name__icontains=q), then=Value(5)),
+        When(username__in=at_tokens, then=Value(0)),
+        When(username__istartswith=cleaned, then=Value(1)),
+        When(first_name__iexact=cleaned, then=Value(2)),
+        When(last_name__iexact=cleaned, then=Value(2)),
+        When(first_name__istartswith=cleaned, then=Value(3)),
+        When(last_name__istartswith=cleaned, then=Value(3)),
+        When(profile__expertise__name__in=tag_tokens, then=Value(4)),
+        When(Q(username__icontains=cleaned) | Q(first_name__icontains=cleaned) | Q(last_name__icontains=cleaned), then=Value(5)),
         default=Value(6),
         output_field=IntegerField()
     )
 
     people = (User.objects
-              .filter(
-                  Q(username__icontains=q) |
-                  Q(first_name__icontains=q) |
-                  Q(last_name__icontains=q) |
-                  Q(profile__expertise__name__icontains=q)
-              )
+              .filter(people_q)
               .annotate(priority=priority)
               .distinct()
               .order_by('priority', 'username')[:100])
 
+    # Public questions search
+    q_qs = Question.objects.all()
+    if tag_tokens:
+        q_qs = q_qs.filter(tags__name__in=tag_tokens)
+    if at_tokens:
+        q_qs = q_qs.filter(author__username__in=at_tokens)
+    for kw in keywords:
+        q_qs = q_qs.filter(
+            Q(title__icontains=kw) | Q(body__icontains=kw) | Q(tags__name__icontains=kw)
+        )
+    q_qs = q_qs.distinct().order_by('-created_at')
+
     return Response({
-        'people': [{
-            'username': u.username,
-            'name': (f"{u.first_name} {u.last_name}".strip() or u.username),
-            'department': u.profile.department,
-            'years_experience': u.profile.years_experience
-        } for u in people],
-        'questions': QuestionSerializer(questions, many=True).data
+        'people': [_user_brief(u) for u in people],
+        'questions': QuestionSerializer(q_qs, many=True).data
     })
 
+
+# ------------------------ Notifications ------------------------
 
 @api_view(['GET'])
 def notifications(request):
@@ -473,6 +585,8 @@ def notifications_read(request):
     return Response({'updated': updated})
 
 
+# ------------------------ Leaderboard ------------------------
+
 @api_view(['GET'])
 def leaderboard(request):
     data = (User.objects
@@ -484,6 +598,8 @@ def leaderboard(request):
         for d in data
     ])
 
+
+# ------------------------ Forgot / Reset / Forgot-username ------------------------
 
 def _json(request):
     return json.loads(request.body.decode('utf-8') or "{}")
@@ -498,7 +614,6 @@ def forgot_password(request):
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
-        # Don't leak existence
         return JsonResponse({"ok": True})
 
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -512,7 +627,7 @@ def forgot_password(request):
         recipient_list=[email],
         fail_silently=True,
     )
-    print("DEV reset link:", reset_link)  # helpful in dev
+    print("DEV reset link:", reset_link)
     return JsonResponse({"ok": True})
 
 
@@ -560,3 +675,146 @@ def forgot_username(request):
         fail_silently=True,
     )
     return JsonResponse({"ok": True})
+
+
+# ------------------------ Direct (private) Questions: list/create ------------------------
+
+def _ensure_dq_visible(request, dq: 'DirectQuestion'):
+    if request.user.id not in (dq.sender_id, dq.recipient_id):
+        return Response({'detail': 'Not authorized'}, status=403)
+    return None
+
+
+@api_view(['GET', 'POST'])
+def direct_questions(request):
+    """
+    GET: list my direct questions (sender or recipient)
+    POST: create a new direct question
+      payload: { "recipient_id": int, "title": str, "body"?: str, "tags"?: [str] }
+    """
+    if not request.user.is_authenticated:
+        return Response({'detail': 'Authentication required'}, status=401)
+
+    if request.method == 'GET':
+        items = (DirectQuestion.objects
+                 .filter(Q(sender=request.user) | Q(recipient=request.user))
+                 .select_related('sender', 'recipient')
+                 .prefetch_related('tags')
+                 .order_by('-created_at')[:200])
+
+        def _dq(dq):
+            return {
+                'id': dq.id,
+                'title': dq.title,
+                'body': dq.body,
+                'tags': [t.name for t in dq.tags.all()],
+                'sender': _user_brief(dq.sender),
+                'recipient': _user_brief(dq.recipient),
+                'created_at': dq.created_at.isoformat(),
+            }
+
+        return Response({'items': [_dq(d) for d in items]})
+
+    # POST
+    data = request.data or {}
+    recipient_id = data.get('recipient_id')
+    title = (data.get('title') or '').strip()
+    body  = (data.get('body') or '').strip()
+    tags_in = data.get('tags') or []
+
+    if not recipient_id or not title:
+        return Response({'detail': 'recipient_id and title are required'}, status=400)
+    if int(recipient_id) == request.user.id:
+        return Response({'detail': 'You cannot send a direct question to yourself'}, status=400)
+
+    try:
+        recipient = User.objects.get(id=recipient_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Recipient not found'}, status=404)
+
+    dq = DirectQuestion.objects.create(
+        sender=request.user,
+        recipient=recipient,
+        title=title,
+        body=body,
+    )
+
+    if tags_in:
+        norm = [str(t).strip().lstrip('#') for t in tags_in if str(t).strip()]
+        existing = list(Tag.objects.filter(name__in=norm))
+        existing_names = {t.name for t in existing}
+        to_create = [Tag(name=n) for n in norm if n not in existing_names]
+        if to_create:
+            Tag.objects.bulk_create(to_create)
+            existing = list(Tag.objects.filter(name__in=norm))
+        dq.tags.set(existing)
+
+    Notification.objects.create(
+        user=recipient,
+        message=f"You have a new direct question from {request.user.username}: {title}",
+    )
+
+    return Response({
+        'id': dq.id,
+        'title': dq.title,
+        'body': dq.body,
+        'tags': [t.name for t in dq.tags.all()],
+        'sender': _user_brief(dq.sender),
+        'recipient': _user_brief(dq.recipient),
+        'created_at': dq.created_at.isoformat(),
+    }, status=201)
+
+
+# ------------------------ Direct (private) Questions: detail ------------------------
+
+@api_view(['GET'])
+def direct_question_detail(request, pk: int):
+    """
+    GET a single direct question.
+    Visible ONLY to sender or recipient.
+    """
+    if not request.user.is_authenticated:
+        return Response({'detail': 'Authentication required'}, status=401)
+
+    try:
+        dq = DirectQuestion.objects.select_related('sender', 'recipient').prefetch_related('tags').get(pk=pk)
+    except DirectQuestion.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=404)
+
+    not_ok = _ensure_dq_visible(request, dq)
+    if not_ok:
+        return not_ok
+
+    return Response({
+        'id': dq.id,
+        'title': dq.title,
+        'body': dq.body,
+        'tags': [t.name for t in dq.tags.all()],
+        'sender': _user_brief(dq.sender),
+        'recipient': _user_brief(dq.recipient),
+        'created_at': dq.created_at.isoformat(),
+    })
+
+
+# ------------------------ Aliases / utilities referenced by urls ------------------------
+
+@api_view(['POST'])
+def notifications_mark_read(request):
+    """
+    Alias for /notifications/read to match references that call a different name.
+    """
+    return notifications_read(request)
+
+
+@api_view(['GET'])
+def ping(request):
+    """
+    Simple health check endpoint.
+    """
+    who = None
+    try:
+        if request.user and request.user.is_authenticated:
+            who = request.user.username
+    except Exception:
+        pass
+    return Response({'ok': True, 'user': who})

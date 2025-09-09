@@ -12,20 +12,31 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id','username','email','first_name','last_name']
 
+class UserBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id','username']
+
 class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     expertise = TagSerializer(many=True, read_only=True)
+
     class Meta:
         model = UserProfile
-        fields = ['user','department','position','bio','hobbies','years_experience','expertise','points_balance','avatar_url']
+        fields = ['user','department','position','bio','hobbies','years_experience','expertise','points_balance']
 
 class QuestionSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, read_only=True)
     author = UserSerializer(read_only=True)
     best_answer_id = serializers.IntegerField(source='best_answer.id', read_only=True)
+    assigned_answerer = UserBriefSerializer(read_only=True)
+
     class Meta:
         model = Question
-        fields = ['id','title','body','tags','urgent','author','created_at','best_answer_id','auto_awarded']
+        fields = [
+            'id','title','body','tags','urgent','author','created_at',
+            'best_answer_id','auto_awarded','assigned_answerer'
+        ]
 
 class AnswerSerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)

@@ -3,17 +3,22 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { logout, isAuthed } from '../auth'
 import api from '../api'
 
-const NavLink = ({to, children}) => {
+const NavLink = ({ to, children }) => {
   const { pathname } = useLocation()
   const active = pathname === to
   return (
-    <Link to={to} className={
-      `px-3 py-2 rounded-md text-sm font-medium ${active ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`
-    }>{children}</Link>
+    <Link
+      to={to}
+      className={`px-3 py-2 rounded-md text-sm font-medium ${
+        active ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+      }`}
+    >
+      {children}
+    </Link>
   )
 }
 
-export default function Navbar({ profile }){
+export default function Navbar({ profile }) {
   const [notes, setNotes] = useState([])
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -28,29 +33,29 @@ export default function Navbar({ profile }){
     } catch (_) {}
   }
 
-  useEffect(()=>{
+  useEffect(() => {
     if (authed) {
       loadNotes()
       const id = setInterval(loadNotes, 10000)
-      return ()=>clearInterval(id)
+      return () => clearInterval(id)
     }
   }, [authed])
 
-  useEffect(()=>{
+  useEffect(() => {
     const onClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setOpen(false)
     }
     document.addEventListener('click', onClickOutside)
-    return ()=>document.removeEventListener('click', onClickOutside)
+    return () => document.removeEventListener('click', onClickOutside)
   }, [])
 
-  const unreadCount = notes.filter(n=>!n.read).length
+  const unreadCount = notes.filter((n) => !n.read).length
 
   const markAllRead = async () => {
-    try{
+    try {
       await api.post('/notifications/read')
       loadNotes()
-    }catch(_){}
+    } catch (_) {}
   }
 
   const clickNote = async (n) => {
@@ -69,12 +74,9 @@ export default function Navbar({ profile }){
   }
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      doSearch()
-    }
+    if (e.key === 'Enter') doSearch()
   }
 
-  // ★ Add this: clear token then redirect to /login
   const handleLogout = () => {
     logout()
     nav('/login')
@@ -83,19 +85,24 @@ export default function Navbar({ profile }){
   return (
     <nav className="bg-white shadow sticky top-0 z-50">
       <div className="max-w-6xl mx-auto px-4">
-        <div className="flex justify-between h-14 items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-xl font-bold text-blue-700">ConnectLink</span>
-            <div className="hidden md:flex gap-2 ml-6">
-              {authed && (
+        {/* 3-area grid with intrinsic sizing:
+            left = auto, center = 1fr, right = auto */}
+        <div className="grid [grid-template-columns:auto_minmax(0,1fr)_auto] items-center h-14 gap-4">
+          {/* LEFT: Brand + links (scrollable if overflow) */}
+          <div className="flex items-center min-w-0">
+            <span className="text-xl font-bold text-blue-700 whitespace-nowrap shrink-0">ConnectLink</span>
+            <div
+              className="hidden md:flex gap-2 ml-3 overflow-x-auto whitespace-nowrap"
+              style={{ scrollbarWidth: 'none' }}
+            >
+              {authed ? (
                 <>
                   <NavLink to="/dashboard">Question Dashboard</NavLink>
                   <NavLink to="/profile">Profile</NavLink>
-                  <NavLink to="/points">Points & Rewards</NavLink>
+                  <NavLink to="/points">Points &amp; Rewards</NavLink>
                   <NavLink to="/faq">FAQ</NavLink>
                 </>
-              )}
-              {!authed && (
+              ) : (
                 <>
                   <NavLink to="/login">Login</NavLink>
                   <NavLink to="/signup">Sign Up</NavLink>
@@ -103,37 +110,46 @@ export default function Navbar({ profile }){
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
+
+          {/* CENTER: Search (stays centered; won’t be pushed by left/right) */}
+          <div className="flex justify-center min-w-0">
+            {authed && (
+              <div className="flex items-center border rounded-md px-2 py-1 w-full max-w-[32rem]">
+                <input
+                  type="text"
+                  id="global-search"
+                  aria-label="Global search"
+                  placeholder="Search: keywords, #tags, @username, or names…"
+                  className="outline-none text-sm flex-1 h-9"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={onKeyDown}
+                />
+                <button
+                  onClick={doSearch}
+                  className="ml-2 text-gray-600 hover:text-gray-900"
+                  title="Search"
+                  aria-label="Run search"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="11" cy="11" r="7" strokeWidth="2"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" strokeWidth="2"></line>
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: Notifications + avatar + logout */}
+          <div className="flex items-center justify-end gap-3">
             {authed && (
               <>
-                <div className="flex items-center border rounded-md px-2 py-1">
-                  <input
-                    type="text"
-                    placeholder="#Search hashtag or keyword"
-                    className="outline-none text-sm"
-                    id="global-search"
-                    value={query}
-                    onChange={(e)=>setQuery(e.target.value)}
-                    onKeyDown={onKeyDown}
-                  />
-                  <button
-                    onClick={doSearch}
-                    className="ml-2 text-gray-600 hover:text-gray-900"
-                    title="Search"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                      <circle cx="11" cy="11" r="7" strokeWidth="2"></circle>
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" strokeWidth="2"></line>
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Notifications */}
                 <div className="relative" ref={dropdownRef}>
                   <button
-                    onClick={()=>setOpen(o=>!o)}
+                    onClick={() => setOpen((o) => !o)}
                     className="relative p-2 rounded-full hover:bg-gray-100"
                     title="Notifications"
+                    aria-label="Open notifications"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-700" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                       <path strokeWidth="2" d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.172V11a6 6 0 1 0-12 0v3.172a2 2 0 0 1-.6 1.428L4 17h5m6 0v1a3 3 0 1 1-6 0v-1m6 0H9" />
@@ -154,10 +170,10 @@ export default function Navbar({ profile }){
                       <div className="max-h-80 overflow-auto">
                         {notes.length === 0 ? (
                           <div className="text-xs text-gray-500 px-2 py-3">No notifications</div>
-                        ) : notes.map(n=>(
+                        ) : notes.map((n) => (
                           <button
                             key={n.id}
-                            onClick={()=>clickNote(n)}
+                            onClick={() => clickNote(n)}
                             className={`w-full text-left px-2 py-2 text-sm rounded ${n.read ? 'bg-white' : 'bg-blue-50 hover:bg-blue-100'}`}
                           >
                             <div>{n.message}</div>
@@ -170,7 +186,11 @@ export default function Navbar({ profile }){
                 </div>
 
                 <Link to="/profile" title="My Profile" className="flex items-center">
-                  <img src={profile?.avatar_url || 'https://ui-avatars.com/api/?name=U'} alt="avatar" className="w-8 h-8 rounded-full border"/>
+                  <img
+                    src={profile?.avatar_url || 'https://ui-avatars.com/api/?name=U'}
+                    alt="avatar"
+                    className="w-8 h-8 rounded-full border"
+                  />
                 </Link>
                 <button onClick={handleLogout} className="text-xs text-gray-500 hover:text-gray-700">Logout</button>
               </>

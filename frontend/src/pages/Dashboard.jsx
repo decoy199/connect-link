@@ -47,7 +47,7 @@ export default function Dashboard(){
     }
   }
 
-  // suggestions from 1+ chars (200ms debounce)
+  // Suggestions from 1+ chars (200ms debounce)
   const onTitleChange = (v)=>{
     setTitle(v)
     const t = v.trim()
@@ -116,6 +116,7 @@ function QuestionCard({ q, meUsername, onDeleted }){
   const [sentOK, setSentOK] = React.useState(false)
   const [editingId, setEditingId] = React.useState(null)
   const [editText, setEditText] = React.useState('')
+  const [errorMsg, setErrorMsg] = React.useState('')
   const nav = useNavigate()
 
   const load = async ()=>{
@@ -124,11 +125,22 @@ function QuestionCard({ q, meUsername, onDeleted }){
   }
   useEffect(()=>{ load() }, [])
 
+  // Assigned answerer guard (UI)
+  const assigned = q.assigned_answerer || null
+  const isAssignedGuardActive = !!assigned && !!meUsername && assigned.username !== meUsername
+  const assignedLabel = assigned ? `Assigned: @${assigned.username}` : null
+
   const submit = async ()=>{
-    await api.post(`/questions/${q.id}/answers`, { body })
-    setBody(''); load()
-    setSentOK(true)
-    setTimeout(()=>setSentOK(false), 2000)
+    setErrorMsg('')
+    try{
+      await api.post(`/questions/${q.id}/answers`, { body })
+      setBody(''); load()
+      setSentOK(true)
+      setTimeout(()=>setSentOK(false), 2000)
+    }catch(e){
+      const msg = e?.response?.data?.detail || 'Failed to send'
+      setErrorMsg(msg)
+    }
   }
   const like = async (aid)=>{
     try{
@@ -155,7 +167,9 @@ function QuestionCard({ q, meUsername, onDeleted }){
     }
   }
   const cancelEdit = ()=>{ setEditingId(null); setEditText('') }
-  const remove = async (aid)=>{
+
+  // Delete answer
+  const removeAnswer = async (aid)=>{
     if (!confirm('Are you sure you want to delete this answer?')) return
     try{
       await api.delete(`/answers/${aid}`)
@@ -165,25 +179,38 @@ function QuestionCard({ q, meUsername, onDeleted }){
     }
   }
 
+  // Optional: delete question (if backend allows DELETE /questions/:id within 30m)
   const isOwnerQ = meUsername && q.author && q.author.username === meUsername
   const canDeleteQ = isOwnerQ && within30m(q.created_at)
+  const removeQuestion = async ()=>{
+    if (!confirm('Delete this question? This cannot be undone.')) return
+    try{
+      await api.delete(`/questions/${q.id}`)
+      onDeleted?.()
+    }catch(e){
+      alert(e.response?.data?.detail || 'Failed to delete question')
+    }
+  }
 
   return (
     <div className="bg-white p-4 rounded-xl shadow">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {q.urgent && <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">URGENT</span>}
+          {assignedLabel && (
+            <span className="text-xs px-2 py-0.5 rounded border">{assignedLabel}</span>
+          )}
           <button className="font-semibold text-lg hover:underline" onClick={()=>nav(`/questions/${q.id}`)}>
             {q.title}
           </button>
         </div>
         {canDeleteQ && (
-          <button onClick={()=>remove(q.id)} className="hidden" />
+          <button onClick={removeQuestion} className="text-xs text-red-600 hover:underline">Delete</button>
         )}
       </div>
       <div className="text-xs text-gray-500 mt-1">Posted: {fmt(q.created_at)}</div>
       <div className="text-gray-600 text-sm my-2">{q.body}</div>
-      <div className="text-xs text-gray-500 mb-2">{q.tags.map(t=> <span key={t.id} className="mr-2">#{t.name}</span>)}</div>
+      <div className="text-xs text-gray-500 mb-2">{q.tags.map(t=> <span key={t.id || t.name} className="mr-2">#{t.name || t}</span>)}</div>
 
       <div className="space-y-2">
         {answers.map(a=>{
@@ -211,7 +238,7 @@ function QuestionCard({ q, meUsername, onDeleted }){
                       <>
                         <span className="text-gray-300">|</span>
                         <button onClick={()=>startEdit(a)} className="hover:underline">Edit</button>
-                        <button onClick={()=>remove(a.id)} className="text-red-600 hover:underline">Delete</button>
+                        <button onClick={()=>removeAnswer(a.id)} className="text-red-600 hover:underline">Delete</button>
                       </>
                     )}
                   </div>
@@ -222,10 +249,35 @@ function QuestionCard({ q, meUsername, onDeleted }){
         })}
       </div>
 
+      {/* Assigned guard message + disabled input */}
+      {isAssignedGuardActive && (
+        <div className="mt-2 text-sm rounded bg-orange-50 border border-orange-200 text-orange-700 px-3 py-2">
+          Only <b>@{assigned.username}</b> can answer this question.
+        </div>
+      )}
+
       <div className="mt-2 flex gap-2">
-        <input className="flex-1 border p-2 rounded" placeholder="Write an answer..." value={body} onChange={e=>setBody(e.target.value)} />
-        <button onClick={submit} className="bg-gray-800 text-white px-3 rounded">Send</button>
+        <input
+          className="flex-1 border p-2 rounded disabled:bg-gray-100"
+          placeholder="Write an answer..."
+          value={body}
+          onChange={e=>setBody(e.target.value)}
+          disabled={isAssignedGuardActive}
+        />
+        <button
+          onClick={submit}
+          className={`px-3 rounded text-white ${isAssignedGuardActive ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-800'}`}
+          disabled={isAssignedGuardActive}
+        >
+          Send
+        </button>
       </div>
+
+      {errorMsg && (
+        <div className="mt-2 text-sm rounded bg-red-50 border border-red-200 text-red-700 px-3 py-2">
+          {errorMsg}
+        </div>
+      )}
 
       {sentOK && (
         <div className="mt-2 text-sm rounded bg-green-50 border border-green-200 text-green-700 px-3 py-2">
@@ -253,7 +305,7 @@ function PointsWidget(){
         <input className="border rounded p-2 flex-1" placeholder="Points to use" value={amt} onChange={e=>setAmt(e.target.value)} />
         <button onClick={redeem} className="bg-green-600 text-white px-3 rounded">Redeem</button>
       </div>
-      {qr && <img src={qr} className="mt-3 w-full rounded" />}
+      {qr && <img src={qr} className="mt-3 w-full rounded" alt="redeem qr" />}
     </div>
   )
 }
@@ -275,24 +327,86 @@ function Leaderboard(){
 
 function Notifications(){
   const [rows, setRows] = useState([])
+
+  // Filters
+  const [onlyUrgentWithTags, setOnlyUrgentWithTags] = useState(false)
+  const [onlyPrivateAssigned, setOnlyPrivateAssigned] = useState(false)
+
+  const nav = useNavigate()
+
   const load = async ()=>{ const r = await api.get('/notifications'); setRows(r.data) }
   useEffect(()=>{ 
     load()
     const id = setInterval(load, 10000)
     return ()=>clearInterval(id)
   }, [])
-  const markAllRead = async ()=>{ await api.post('/notifications/read'); load() }
+
+  const markAllRead = async ()=>{
+    try{
+      await api.post('/notifications/read')
+      load()
+    }catch(e){
+      // Fallback to alternate path if present
+      if (e?.response?.status === 404) {
+        try { await api.post('/notifications_read'); load() } catch { /* ignore */ }
+      }
+    }
+  }
+
+  const filtered = rows.filter(n=>{
+    const msg = String(n.message || '')
+    const isUrgent = msg.startsWith('URGENT:')
+    const isAssigned = msg.startsWith('You were assigned')
+    if (onlyUrgentWithTags && !isUrgent) return false
+    if (onlyPrivateAssigned && !isAssigned) return false
+    return true
+  })
+
   return (
     <div className="bg-white p-4 rounded-xl shadow">
       <div className="flex items-center justify-between mb-2">
         <div className="font-semibold">Notifications</div>
         <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
       </div>
+
+      <div className="flex items-center gap-4 text-sm mb-3">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={onlyUrgentWithTags} onChange={e=>setOnlyUrgentWithTags(e.target.checked)} />
+          Urgent + related hashtags
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={onlyPrivateAssigned} onChange={e=>setOnlyPrivateAssigned(e.target.checked)} />
+          Private/assigned only
+        </label>
+      </div>
+
       <ul className="text-sm space-y-2">
-        {rows.map(n=>(<li key={n.id} className={`border rounded p-2 ${n.read?'bg-white':'bg-blue-50'}`}>
-          <div>{n.message}</div>
-          <div className="text-[11px] text-gray-500">{fmt(n.created_at)}</div>
-        </li>))}
+        {filtered.map(n=>(
+          <li
+            key={n.id}
+            className={`border rounded p-2 ${n.read?'bg-white':'bg-blue-50'} cursor-pointer hover:bg-blue-100`}
+            onClick={()=>{ if (n.question_id) nav(`/questions/${n.question_id}`) }}
+            title={n.question_id ? 'Open question' : undefined}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div>{n.message}</div>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                  {String(n.message || '').startsWith('You were assigned') && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border">private</span>
+                  )}
+                  {String(n.message || '').startsWith('URGENT:') && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">urgent</span>
+                  )}
+                  {n.question_id && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border">question #{n.question_id}</span>
+                  )}
+                </div>
+              </div>
+              <div className="shrink-0 text-[11px] text-gray-500">{fmt(n.created_at)}</div>
+            </div>
+          </li>
+        ))}
       </ul>
     </div>
   )
