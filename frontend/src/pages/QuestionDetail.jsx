@@ -106,7 +106,7 @@ export default function QuestionDetail(){
         <div className="bg-white p-4 rounded-xl shadow mt-3">
           <div className="text-xl font-semibold">{q.title}</div>
           <div className="text-sm text-gray-500 mt-1">
-            Asked by {q.author?.username} · {fmt(q.created_at)}
+            {fmt(q.created_at)}
           </div>
           <div className="mt-3 whitespace-pre-wrap">{q.body}</div>
 
