@@ -243,7 +243,7 @@ export default function Search() {
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{qi.title}</div>
-                        <div className="text-xs text-gray-500">{qi.author?.username} · {fmt(qi.created_at)}</div>
+                        <div className="text-xs text-gray-500">{fmt(qi.created_at)}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           {(qi.tags || []).map((t, idx) => {
                             const name = tagText(t)
