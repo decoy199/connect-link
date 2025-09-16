@@ -90,7 +90,12 @@ export default function Navbar({ profile }) {
         <div className="grid [grid-template-columns:auto_minmax(0,1fr)_auto] items-center h-14 gap-4">
           {/* LEFT: Brand + links (scrollable if overflow) */}
           <div className="flex items-center min-w-0">
-            <span className="text-xl font-bold text-blue-700 whitespace-nowrap shrink-0">ConnectLink</span>
+            <button 
+              onClick={() => nav(authed ? '/dashboard' : '/login')}
+              className="text-xl font-bold text-blue-700 whitespace-nowrap shrink-0 hover:text-blue-800 transition-colors"
+            >
+              HandRaise
+            </button>
             <div
               className="hidden md:flex gap-2 ml-3 overflow-x-auto whitespace-nowrap"
               style={{ scrollbarWidth: 'none' }}
