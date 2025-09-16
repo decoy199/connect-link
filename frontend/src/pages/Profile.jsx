@@ -94,7 +94,8 @@ export default function Profile() {
   const on = (k) => (e) => setForm(s => ({ ...s, [k]: e.target.value }))
 
   return (
-    <div className="max-w-3xl mx-auto p-4">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-3xl mx-auto p-4">
       <Toast show={saved}>Updated</Toast>
 
       <div className="bg-white p-4 rounded-xl shadow space-y-3">
@@ -148,9 +149,10 @@ export default function Profile() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={save} className="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
+          <button onClick={save} className="bg-custom-gradient text-white px-4 py-2 rounded hover:opacity-90 transition-opacity">Save</button>
           {form.avatar_url && <img src={form.avatar_url} className="w-10 h-10 rounded-full border" alt="avatar preview" />}
         </div>
+      </div>
       </div>
     </div>
   )

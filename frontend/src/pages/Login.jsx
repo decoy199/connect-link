@@ -21,8 +21,9 @@ export default function Login(){
   }
 
   return (
-    <div className="max-w-md mx-auto mt-10 bg-white p-6 rounded-xl shadow">
-      <h1 className="text-2xl font-bold mb-4">Login</h1>
+    <div className="min-h-screen bg-custom-gradient flex items-center justify-center">
+      <div className="max-w-md w-full bg-white p-6 rounded-xl shadow-lg">
+        <h1 className="text-2xl font-bold mb-4 text-center">Login</h1>
       {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
       <form onSubmit={submit} className="space-y-3">
         <input
@@ -38,7 +39,7 @@ export default function Login(){
           value={password}
           onChange={e=>setP(e.target.value)}
         />
-        <button className="w-full bg-blue-600 text-white py-2 rounded">Login</button>
+        <button className="w-full bg-custom-gradient text-white py-2 rounded hover:opacity-90 transition-opacity">Login</button>
 
         {/* added */}
         <div className="flex justify-between text-sm mt-2">
@@ -46,6 +47,7 @@ export default function Login(){
           <Link to="/forgot-username" className="underline">Forgot username?</Link>
         </div>
       </form>
+      </div>
     </div>
   )
 }

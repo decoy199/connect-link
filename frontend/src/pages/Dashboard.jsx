@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api'
+import LoadingSpinner, { LoadingButton } from '../components/LoadingSpinner'
+import ErrorMessage, { SuccessMessage } from '../components/ErrorMessage'
+import PaginationControls from '../components/Pagination'
 
 const fmt = (s) => new Date(s).toLocaleString()
 const within30m = (iso) => (Date.now() - new Date(iso).getTime()) <= 30 * 60 * 1000
@@ -25,25 +28,81 @@ export default function Dashboard(){
   const [suggest, setSuggest] = useState([])
   const [me, setMe] = useState(null)
   const [postedInfo, setPostedInfo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [pagination, setPagination] = useState({
+    current: 1,
+    total: 0,
+    pageSize: 20
+  })
 
   const suggestTimer = useRef(null)
 
-  const load = async ()=>{
-    const { data } = await api.get('/questions')
-    setQ(data)
+  const load = async (page = 1) => {
+    try {
+      setLoading(true)
+      setError('')
+      const { data } = await api.get(`/questions?page=${page}&page_size=${pagination.pageSize}`)
+      
+      if (data.results) {
+        // Paginated response
+        setQ(data.results)
+        setPagination(prev => ({
+          ...prev,
+          current: page,
+          total: Math.ceil(data.count / pagination.pageSize)
+        }))
+      } else {
+        // Non-paginated response (fallback)
+        setQ(data)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
-  useEffect(()=>{ load() }, [])
 
-  useEffect(()=>{ api.get('/me').then(r=>setMe(r.data)).catch(()=>{}) },[])
+  useEffect(() => { load() }, [])
 
-  const post = async ()=>{
-    const tagArr = tags.split(',').map(s=>s.trim()).filter(Boolean)
-    await api.post('/questions', { title, body, tags: tagArr, urgent })
-    setTitle(''); setBody(''); setTags(''); setUrgent(false); setSuggest([])
-    load()
-    if (urgent) {
-      setPostedInfo('Notifications were sent to users with matching tags.')
-      setTimeout(()=>setPostedInfo(''), 4000)
+  useEffect(() => { 
+    api.get('/me')
+      .then(r => setMe(r.data))
+      .catch(err => setError('Failed to load profile'))
+  }, [])
+
+  const post = async () => {
+    if (!title.trim()) {
+      setError('Title is required')
+      return
+    }
+
+    try {
+      setLoading(true)
+      setError('')
+      const tagArr = tags.split(',').map(s => s.trim()).filter(Boolean)
+      await api.post('/questions', { title, body, tags: tagArr, urgent })
+      
+      setTitle('')
+      setBody('')
+      setTags('')
+      setUrgent(false)
+      setSuggest([])
+      
+      setSuccess('Question posted successfully!')
+      setTimeout(() => setSuccess(''), 3000)
+      
+      load(1) // Reload first page
+      
+      if (urgent) {
+        setPostedInfo('Notifications were sent to users with matching tags.')
+        setTimeout(() => setPostedInfo(''), 4000)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -65,37 +124,89 @@ export default function Dashboard(){
   const onDeleted = ()=> load()
 
   return (
-    <div className="max-w-6xl mx-auto p-4">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-6xl mx-auto p-4">
       <Toast show={!!postedInfo}>{postedInfo}</Toast>
 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <div className="bg-white p-4 rounded-xl shadow">
             <h2 className="font-bold text-lg mb-2">Ask Anonymously</h2>
-            <input className="w-full border p-2 rounded mb-2" placeholder="Title" value={title} onChange={e=>onTitleChange(e.target.value)} />
-            {suggest.length>0 && (
+            
+            {error && <ErrorMessage error={error} onDismiss={() => setError('')} className="mb-4" />}
+            {success && <SuccessMessage message={success} onDismiss={() => setSuccess('')} className="mb-4" />}
+            
+            <input 
+              className="w-full border p-2 rounded mb-2" 
+              placeholder="Title" 
+              value={title} 
+              onChange={e => onTitleChange(e.target.value)}
+              disabled={loading}
+            />
+            {suggest.length > 0 && (
               <div className="text-xs text-gray-600 mb-2">
                 Similar:{' '}
-                {suggest.map(s=>(
+                {suggest.map(s => (
                   <button key={s.id} type="button"
-                          onClick={()=>window.location.assign(`/questions/${s.id}`)}
+                          onClick={() => window.location.assign(`/questions/${s.id}`)}
                           className="mr-2 text-blue-600 hover:underline">
                     #{s.title}
                   </button>
                 ))}
               </div>
             )}
-            <textarea className="w-full border p-2 rounded mb-2" rows="3" placeholder="Body" value={body} onChange={e=>setBody(e.target.value)} />
-            <input className="w-full border p-2 rounded mb-2" placeholder="tags (comma separated, e.g. Python, Django)" value={tags} onChange={e=>setTags(e.target.value)} />
+            <textarea 
+              className="w-full border p-2 rounded mb-2" 
+              rows="3" 
+              placeholder="Body" 
+              value={body} 
+              onChange={e => setBody(e.target.value)}
+              disabled={loading}
+            />
+            <input 
+              className="w-full border p-2 rounded mb-2" 
+              placeholder="tags (comma separated, e.g. Python, Django)" 
+              value={tags} 
+              onChange={e => setTags(e.target.value)}
+              disabled={loading}
+            />
             <label className="flex items-center gap-2 text-sm mb-3">
-              <input type="checkbox" checked={urgent} onChange={e=>setUrgent(e.target.checked)} />
+              <input 
+                type="checkbox" 
+                checked={urgent} 
+                onChange={e => setUrgent(e.target.checked)}
+                disabled={loading}
+              />
               Urgent
             </label>
-            <button onClick={post} className="bg-blue-600 text-white px-4 py-2 rounded">Post</button>
+            <LoadingButton
+              loading={loading}
+              onClick={post}
+              className="bg-custom-gradient text-white px-4 py-2 rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              Post Question
+            </LoadingButton>
           </div>
 
-          <div className="mt-4 space-y-3">
-            {questions.map(q=> <QuestionCard key={q.id} q={q} meUsername={me?.user?.username} onDeleted={onDeleted} />)}
+          <div className="mt-4">
+            <h3 className="font-semibold text-lg mb-3">Recent Questions</h3>
+            {loading ? (
+              <LoadingSpinner className="py-8" />
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {questions.map(q => <QuestionCard key={q.id} q={q} meUsername={me?.user?.username} onDeleted={onDeleted} />)}
+                </div>
+                
+                {pagination.total > 1 && (
+                  <PaginationControls 
+                    current={pagination.current}
+                    total={pagination.total}
+                    onPageChange={load}
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -104,6 +215,7 @@ export default function Dashboard(){
           <Leaderboard />
           <Notifications />
         </div>
+      </div>
       </div>
     </div>
   )
@@ -223,7 +335,7 @@ function QuestionCard({ q, meUsername, onDeleted }){
                 <div className="space-y-2">
                   <textarea className="w-full border rounded p-2" rows="3" value={editText} onChange={e=>setEditText(e.target.value)} />
                   <div className="flex gap-2 text-sm">
-                    <button onClick={saveEdit} className="bg-blue-600 text-white px-3 py-1 rounded">Save</button>
+                    <button onClick={saveEdit} className="bg-custom-gradient text-white px-3 py-1 rounded hover:opacity-90 transition-opacity">Save</button>
                     <button onClick={cancelEdit} className="border px-3 py-1 rounded">Cancel</button>
                   </div>
                 </div>
@@ -303,7 +415,7 @@ function PointsWidget(){
       <div className="text-3xl font-bold">{bal}</div>
       <div className="mt-3 flex gap-2">
         <input className="border rounded p-2 flex-1" placeholder="Points to use" value={amt} onChange={e=>setAmt(e.target.value)} />
-        <button onClick={redeem} className="bg-green-600 text-white px-3 rounded">Redeem</button>
+        <button onClick={redeem} className="bg-custom-gradient text-white px-3 rounded hover:opacity-90 transition-opacity">Redeem</button>
       </div>
       {qr && <img src={qr} className="mt-3 w-full rounded" alt="redeem qr" />}
     </div>

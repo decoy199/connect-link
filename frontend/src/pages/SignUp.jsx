@@ -73,7 +73,8 @@ export default function SignUp() {
     'w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   return (
-    <div className="max-w-xl mx-auto mt-10 p-6 bg-white rounded-2xl shadow">
+    <div className="min-h-screen bg-custom-gradient flex items-center justify-center">
+      <div className="max-w-xl w-full p-6 bg-white rounded-2xl shadow-lg">
       <h1 className="text-2xl font-semibold mb-6">Sign Up</h1>
 
       {err && <p className="mb-4 text-sm text-red-600">{err}</p>}
@@ -232,7 +233,7 @@ export default function SignUp() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full bg-blue-600 text-white py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50"
+          className="w-full bg-custom-gradient text-white py-2.5 rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
           {submitting ? 'Signing up…' : 'Sign Up'}
         </button>
@@ -244,6 +245,7 @@ export default function SignUp() {
           Log in
         </Link>
       </p>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import api from '../api'
+import LoadingSpinner from '../components/LoadingSpinner'
+import ErrorMessage from '../components/ErrorMessage'
 
 const fmt = (s) => new Date(s).toLocaleString()
 
@@ -165,20 +167,34 @@ export default function Search() {
   const [people, setPeople] = useState([])
   const [questions, setQuestions] = useState([])
   const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [totalResults, setTotalResults] = useState(0)
   const [modalFor, setModalFor] = useState(null)
   const [profileFor, setProfileFor] = useState(null)
 
   useEffect(() => {
     let cancel = false
     async function load() {
+      if (!q.trim()) {
+        setPeople([])
+        setQuestions([])
+        setTotalResults(0)
+        return
+      }
+
       try {
+        setLoading(true)
+        setErr('')
         const { data } = await api.get('/search', { params: { q } })
         if (!cancel) {
           setPeople(data.people || [])
           setQuestions(data.questions || [])
+          setTotalResults(data.total_results || 0)
         }
       } catch (e) {
-        if (!cancel) setErr(e.response?.data?.detail || 'Search failed')
+        if (!cancel) setErr(e.message || 'Search failed')
+      } finally {
+        if (!cancel) setLoading(false)
       }
     }
     load()
@@ -187,88 +203,100 @@ export default function Search() {
 
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <h1 className="text-xl font-semibold mb-3">Search</h1>
-      {err && <div className="mb-3 text-sm text-red-600">{err}</div>}
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold mb-2">Search</h1>
+        {q && (
+          <p className="text-gray-600">
+            {loading ? 'Searching...' : `Found ${totalResults} results for "${q}"`}
+          </p>
+        )}
+      </div>
 
-      <div className="grid md:grid-cols-3 gap-4">
-        {/* Left: People */}
-        <div className="md:col-span-1">
-          <div className="border rounded-xl">
-            <div className="p-3 border-b">
-              <h2 className="font-medium">People</h2>
-            </div>
-            <div className="divide-y">
-              {people.length === 0 && <div className="p-3 text-sm text-gray-500">No matching people</div>}
-              {people.map((p) => (
-                <div key={p.id} className="p-3 flex items-center gap-3">
-                  <button className="flex items-center gap-3 text-left min-w-0"
-                          onClick={() => setProfileFor(p)}
-                          title="Open profile">
-                    <img
-                      src={p.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name || p.username)}`}
-                      alt=""
-                      className="w-10 h-10 rounded-full border"
-                    />
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{p.name || p.username}</div>
-                      <div className="text-xs text-gray-500 truncate">
-                        @{p.username} · {p.department} · {p.years_experience} yrs
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    className="text-sm px-2.5 py-1.5 rounded-lg border hover:bg-gray-50"
-                    onClick={() => setModalFor(p)}
-                    title={`Ask ${p.name || p.username} privately (public question assigned to them)`}
-                  >
-                    Ask privately
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      {err && <ErrorMessage error={err} onDismiss={() => setErr('')} className="mb-4" />}
 
-        {/* Right: Public Questions */}
-        <div className="md:col-span-2">
-          <div className="border rounded-xl">
-            <div className="p-3 border-b">
-              <h2 className="font-medium">Public Questions</h2>
-            </div>
-            <ul className="divide-y">
-              {questions.length === 0 && <li className="p-3 text-sm text-gray-500">No questions</li>}
-              {questions.map((qi) => (
-                <li key={qi.id}>
-                  <Link to={`/questions/${qi.id}`} className="block p-3 hover:bg-gray-50">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{qi.title}</div>
-                        <div className="text-xs text-gray-500">{fmt(qi.created_at)}</div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {(qi.tags || []).map((t, idx) => {
-                            const name = tagText(t)
-                            return <Pill key={`${qi.id}-tag-${name}-${idx}`}>#{name}</Pill>
-                          })}
-                          {qi.assigned_answerer && (
-                            <span className="text-xs ml-2 px-2 py-0.5 rounded-full border">
-                              Assigned: @{qi.assigned_answerer.username}
-                            </span>
-                          )}
-                          {qi.urgent && (
-                            <span className="text-xs ml-2 px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">
-                              URGENT
-                            </span>
-                          )}
+      {loading ? (
+        <LoadingSpinner className="py-12" />
+      ) : (
+        <div className="grid md:grid-cols-3 gap-4">
+          {/* Left: People */}
+          <div className="md:col-span-1">
+            <div className="border rounded-xl">
+              <div className="p-3 border-b">
+                <h2 className="font-medium">People</h2>
+              </div>
+              <div className="divide-y">
+                {people.length === 0 && <div className="p-3 text-sm text-gray-500">No matching people</div>}
+                {people.map((p) => (
+                  <div key={p.id} className="p-3 flex items-center gap-3">
+                    <button className="flex items-center gap-3 text-left min-w-0"
+                            onClick={() => setProfileFor(p)}
+                            title="Open profile">
+                      <img
+                        src={p.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name || p.username)}`}
+                        alt=""
+                        className="w-10 h-10 rounded-full border"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{p.name || p.username}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          @{p.username} · {p.department} · {p.years_experience} yrs
                         </div>
                       </div>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                    </button>
+                    <button
+                      className="text-sm px-2.5 py-1.5 rounded-lg border hover:bg-gray-50"
+                      onClick={() => setModalFor(p)}
+                      title={`Ask ${p.name || p.username} privately (public question assigned to them)`}
+                    >
+                      Ask privately
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Public Questions */}
+          <div className="md:col-span-2">
+            <div className="border rounded-xl">
+              <div className="p-3 border-b">
+                <h2 className="font-medium">Public Questions</h2>
+              </div>
+              <ul className="divide-y">
+                {questions.length === 0 && <li className="p-3 text-sm text-gray-500">No questions</li>}
+                {questions.map((qi) => (
+                  <li key={qi.id}>
+                    <Link to={`/questions/${qi.id}`} className="block p-3 hover:bg-gray-50">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{qi.title}</div>
+                          <div className="text-xs text-gray-500">{fmt(qi.created_at)}</div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {(qi.tags || []).map((t, idx) => {
+                              const name = tagText(t)
+                              return <Pill key={`${qi.id}-tag-${name}-${idx}`}>#{name}</Pill>
+                            })}
+                            {qi.assigned_answerer && (
+                              <span className="text-xs ml-2 px-2 py-0.5 rounded-full border">
+                                Assigned: @{qi.assigned_answerer.username}
+                              </span>
+                            )}
+                            {qi.urgent && (
+                              <span className="text-xs ml-2 px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">
+                                URGENT
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <AskModal
         open={!!modalFor}
