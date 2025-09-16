@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from 'react-router-dom' // ⬅️ no BrowserR
 
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
 
 import Login from './pages/Login'
 import SignUp from './pages/SignUp'
@@ -33,7 +34,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <ErrorBoundary>
       <Navbar profile={profile} />
 
       <Routes>
@@ -58,6 +59,6 @@ export default function App() {
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </>
+    </ErrorBoundary>
   )
 }
