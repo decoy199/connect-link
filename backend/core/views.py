@@ -3,23 +3,28 @@ from io import BytesIO
 import base64
 import json
 import re
+import logging
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from django.core.paginator import Paginator
 from django.db.models import Q, Sum, Case, When, IntegerField, Value
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.views.decorators.csrf import csrf_exempt
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.pagination import PageNumberPagination
 
 import qrcode
 
@@ -32,7 +37,48 @@ from .serializers import (
     AnswerSerializer, PointTransactionSerializer, NotificationSerializer
 )
 
+logger = logging.getLogger(__name__)
+
 FRONTEND_BASE_URL = "http://localhost:5175"
+
+
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+def validate_password_strength(password):
+    """Validate password strength."""
+    if len(password) < 8:
+        return "Password must be at least 8 characters long."
+    
+    if not re.search(r'[A-Z]', password):
+        return "Password must contain at least one uppercase letter."
+    
+    if not re.search(r'[a-z]', password):
+        return "Password must contain at least one lowercase letter."
+    
+    if not re.search(r'\d', password):
+        return "Password must contain at least one number."
+    
+    return None
+
+
+def send_notification_email(user, subject, message, question=None):
+    """Send notification email to user."""
+    try:
+        if user.email:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=None,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            logger.info(f"Notification email sent to {user.email}")
+    except Exception as e:
+        logger.error(f"Failed to send notification email to {user.email}: {e}")
 
 
 def _token_for_user(user):
@@ -49,63 +95,95 @@ def register(request):
     Create user, set profile fields, attach expertise hashtags,
     and immediately issue JWT (auto-login).
     """
-    data = request.data
+    try:
+        data = request.data
 
-    username_raw = (data.get('username') or '').strip()
-    password = data.get('password')
-    email = (data.get('email', '') or '').strip().lower()
+        # Validate required fields
+        username_raw = (data.get('username') or '').strip()
+        password = data.get('password')
+        email = (data.get('email', '') or '').strip().lower()
 
-    if not password:
-        return Response({'detail': 'username and password required'}, status=400)
+        if not password:
+            return Response({'detail': 'Password is required'}, status=400)
 
-    if username_raw:
-        if User.objects.filter(username=username_raw).exists():
-            return Response({'detail': 'username already exists'}, status=400)
-        username = username_raw
-    else:
-        base = email.split('@')[0].strip() if email else ''
-        if not base:
-            return Response({'detail': 'username and password required'}, status=400)
-        candidate = base
-        counter = 0
-        while User.objects.filter(username=candidate).exists():
-            counter += 1
-            candidate = f"{base}{counter}"
-        username = candidate
+        # Validate email format
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return Response({'detail': 'Invalid email format'}, status=400)
 
-    # Create user and set names
-    user = User.objects.create_user(username=username, password=password, email=email)
-    user.first_name = (data.get('first_name') or '').strip()
-    user.last_name = (data.get('last_name') or '').strip()
-    user.save()
+        # Validate password strength
+        password_error = validate_password_strength(password)
+        if password_error:
+            return Response({'detail': password_error}, status=400)
 
-    # Profile fields
-    profile = user.profile
-    profile.department = data.get('department', '')
-    profile.position = data.get('position', '')
-    profile.years_experience = int(data.get('years_experience', 0) or 0)
-    # Avatar URL kept for compatibility
-    profile.avatar_url = ''
-    profile.save()
+        # Handle username generation
+        if username_raw:
+            if User.objects.filter(username=username_raw).exists():
+                return Response({'detail': 'Username already exists'}, status=400)
+            username = username_raw
+        else:
+            if not email:
+                return Response({'detail': 'Username or email is required'}, status=400)
+            base = email.split('@')[0].strip()
+            if not base:
+                return Response({'detail': 'Invalid email for username generation'}, status=400)
+            candidate = base
+            counter = 0
+            while User.objects.filter(username=candidate).exists():
+                counter += 1
+                candidate = f"{base}{counter}"
+            username = candidate
 
-    # Expertise hashtags
-    raw_tags = data.get('expertise_hashtags', [])
-    if isinstance(raw_tags, str):
-        raw_tags = [t.strip() for t in raw_tags.split(',')]
-    names = [t.strip().lstrip('#').lower() for t in raw_tags if t and t.strip()]
-    if names:
-        tag_objs = []
-        for nm in dict.fromkeys(names):
-            tag, _ = Tag.objects.get_or_create(name=nm)
-            tag_objs.append(tag)
-        profile.expertise.set(tag_objs)
+        # Check if email already exists
+        if email and User.objects.filter(email=email).exists():
+            return Response({'detail': 'Email already exists'}, status=400)
+
+        # Create user and set names
+        user = User.objects.create_user(username=username, password=password, email=email)
+        user.first_name = (data.get('first_name') or '').strip()
+        user.last_name = (data.get('last_name') or '').strip()
+        user.save()
+
+        # Profile fields
+        profile = user.profile
+        profile.department = (data.get('department') or '').strip()
+        profile.position = (data.get('position') or '').strip()
+        profile.bio = (data.get('bio') or '').strip()
+        profile.hobbies = (data.get('hobbies') or '').strip()
+        profile.years_experience = int(data.get('years_experience', 0) or 0)
+        profile.avatar_url = ''
         profile.save()
 
-    tokens = _token_for_user(user)
-    resp = Response({'token': tokens}, status=201)
-    resp.set_cookie('access', tokens['access'], httponly=True, secure=False, samesite='Lax', max_age=60*60, path='/')
-    resp.set_cookie('refresh', tokens['refresh'], httponly=True, secure=False, samesite='Lax', max_age=60*60*24*7, path='/')
-    return resp
+        # Expertise hashtags
+        raw_tags = data.get('expertise_hashtags', [])
+        if isinstance(raw_tags, str):
+            raw_tags = [t.strip() for t in raw_tags.split(',')]
+        names = [t.strip().lstrip('#').lower() for t in raw_tags if t and t.strip()]
+        if names:
+            tag_objs = []
+            for nm in dict.fromkeys(names):
+                tag, _ = Tag.objects.get_or_create(name=nm)
+                tag_objs.append(tag)
+            profile.expertise.set(tag_objs)
+            profile.save()
+
+        # Award initial points
+        award_points(user, 50, 'Welcome bonus')
+
+        # Auto-login: issue JWT
+        tokens = _token_for_user(user)
+        resp = Response({'token': tokens, 'user': UserProfileSerializer(profile).data}, status=201)
+        resp.set_cookie('access', tokens['access'], httponly=True, secure=False, samesite='Lax', max_age=60*60*8, path='/')
+        resp.set_cookie('refresh', tokens['refresh'], httponly=True, secure=False, samesite='Lax', max_age=60*60*24*7, path='/')
+        
+        logger.info(f"New user registered: {username} ({email})")
+        return resp
+
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        return Response({'detail': 'Registration failed. Please try again.'}, status=500)
 
 
 @api_view(['POST'])
@@ -212,23 +290,32 @@ def _maybe_auto_award(q: "Question"):
 @api_view(['GET', 'POST'])
 def questions(request):
     """
-    GET: list public questions
+    GET: list public questions with pagination
       - optional ?tag=tagname
+      - optional ?page=1&page_size=20
     POST: create a public question
       - accepts optional recipient_id to assign a single answerer
       - Anyone can view; only assigned user can answer
       - Notifications:
           * urgent + tags -> expertise-matched users
-          * assigned recipient -> “You were assigned …”
+          * assigned recipient -> "You were assigned …"
     """
     if request.method == 'GET':
         qset = Question.objects.all().order_by('-created_at')
         tag = request.GET.get('tag')
         if tag:
             qset = qset.filter(tags__name__iexact=tag.lstrip('#'))
-        for q in qset[:20]:
+        
+        # Apply auto-awarding to all questions
+        for q in qset:
             _maybe_auto_award(q)
-        return Response(QuestionSerializer(qset, many=True).data)
+        
+        # Pagination
+        paginator = StandardResultsSetPagination()
+        result_page = paginator.paginate_queryset(qset, request)
+        serializer = QuestionSerializer(result_page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
     # POST
     data = request.data
@@ -290,6 +377,13 @@ def questions(request):
                     message=f"URGENT: {q.title} (tags: {', '.join(tag_names)})",
                     question=q,
                 )
+                # Send email notification for urgent questions
+                send_notification_email(
+                    u, 
+                    f"URGENT Question: {q.title}",
+                    f"A new urgent question has been posted that matches your expertise:\n\n{q.title}\n\n{q.body}\n\nTags: {', '.join(tag_names)}\n\nView and answer: {FRONTEND_BASE_URL}/questions/{q.id}",
+                    q
+                )
 
     # 2) assigned recipient gets private-style notification
     if assigned_user:
@@ -297,6 +391,13 @@ def questions(request):
             user=assigned_user,
             message=f"You were assigned to answer: {q.title}",
             question=q,
+        )
+        # Send email notification for assigned questions
+        send_notification_email(
+            assigned_user,
+            f"Question Assignment: {q.title}",
+            f"You have been assigned to answer a question:\n\n{q.title}\n\n{q.body}\n\nPlease provide your answer: {FRONTEND_BASE_URL}/questions/{q.id}",
+            q
         )
 
     data_out = QuestionSerializer(q).data
@@ -370,6 +471,13 @@ def answers(request, qid):
             user=q.author,
             message=f"New answer to: {q.title}",
             question=q,
+        )
+        # Send email notification for new answers
+        send_notification_email(
+            q.author,
+            f"New Answer: {q.title}",
+            f"Someone answered your question:\n\n{q.title}\n\nAnswer by {request.user.get_full_name() or request.user.username}:\n{body}\n\nView the full discussion: {FRONTEND_BASE_URL}/questions/{q.id}",
+            q
         )
 
     return Response(AnswerSerializer(a).data, status=201)
@@ -462,7 +570,7 @@ def redeem_qr(request):
     p.points_balance -= amount
     p.save(update_fields=['points_balance'])
     PointTransaction.objects.create(user=request.user, amount=-amount, reason='Redeemed at cafeteria')
-    payload = f"CONNECTLINK|USER:{request.user.username}|POINTS:{amount}|TS:{timezone.now().isoformat()}"
+    payload = f"HANDRAISE|USER:{request.user.username}|POINTS:{amount}|TS:{timezone.now().isoformat()}"
     img = qrcode.make(payload)
     buf = BytesIO()
     img.save(buf, format='PNG')
@@ -561,10 +669,19 @@ def search(request):
         )
     q_qs = q_qs.distinct().order_by('-created_at')
 
-    return Response({
-        'people': [_user_brief(u) for u in people],
-        'questions': QuestionSerializer(q_qs, many=True).data
-    })
+    # Limit results for performance
+    questions = q_qs[:20]
+    people_list = people[:10]
+    
+    result = {
+        'people': [_user_brief(u) for u in people_list],
+        'questions': QuestionSerializer(questions, many=True).data,
+        'total_results': len(people_list) + len(questions),
+        'query': qraw
+    }
+    
+    logger.info(f"Search query '{qraw}' returned {result['total_results']} results")
+    return Response(result)
 
 
 # ------------------------ Notifications ------------------------
