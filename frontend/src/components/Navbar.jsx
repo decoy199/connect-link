@@ -88,7 +88,7 @@ export default function Navbar({ profile }) {
         <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
           {/* LEFT: Brand + links (scrollable if overflow) */}
           <div className="flex flex-col items-start min-w-0 w-full">
-            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">ConnectLink</span>
+            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">HandRaise</span>
             <div
               className="flex flex-col gap-1 mt-4"
               style={{ scrollbarWidth: 'none' }}
