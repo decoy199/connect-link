@@ -1,3 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Sidebar + page background adjustments */
+body { padding-left: 15rem; } /* matches w-60 */
+nav.sidebar { background-color: #8B4513; color: #fff; }

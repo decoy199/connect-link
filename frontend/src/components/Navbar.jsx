@@ -9,9 +9,7 @@ const NavLink = ({ to, children }) => {
   return (
     <Link
       to={to}
-      className={`px-3 py-2 rounded-md text-sm font-medium ${
-        active ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
-      }`}
+      className={`px-3 py-2 rounded-md text-sm font-medium block w-full text-left ${active ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/10'}`}
     >
       {children}
     </Link>
@@ -83,16 +81,16 @@ export default function Navbar({ profile }) {
   }
 
   return (
-    <nav className="bg-white shadow sticky top-0 z-50">
-      <div className="max-w-6xl mx-auto px-4">
+    <nav className="fixed left-0 top-0 h-screen w-60 bg-[#8B4513] text-white z-50 shadow-lg flex flex-col sidebar overflow-hidden">
+      <div className="px-3 w-full">
         {/* 3-area grid with intrinsic sizing:
             left = auto, center = 1fr, right = auto */}
-        <div className="grid [grid-template-columns:auto_minmax(0,1fr)_auto] items-center h-14 gap-4">
+        <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
           {/* LEFT: Brand + links (scrollable if overflow) */}
-          <div className="flex items-center min-w-0">
-            <span className="text-xl font-bold text-blue-700 whitespace-nowrap shrink-0">ConnectLink</span>
+          <div className="flex flex-col items-start min-w-0 w-full">
+            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">ConnectLink</span>
             <div
-              className="hidden md:flex gap-2 ml-3 overflow-x-auto whitespace-nowrap"
+              className="flex flex-col gap-1 mt-4"
               style={{ scrollbarWidth: 'none' }}
             >
               {authed ? (
@@ -112,22 +110,22 @@ export default function Navbar({ profile }) {
           </div>
 
           {/* CENTER: Search (stays centered; won’t be pushed by left/right) */}
-          <div className="flex justify-center min-w-0">
+          <div className="w-full min-w-0">
             {authed && (
-              <div className="flex items-center border rounded-md px-2 py-1 w-full max-w-[32rem]">
+              <div className="flex items-center border rounded-md px-2 py-1 w-full max-w-full">
                 <input
                   type="text"
                   id="global-search"
                   aria-label="Global search"
                   placeholder="Search: keywords, #tags, @username, or names…"
-                  className="outline-none text-sm flex-1 h-9"
+                  className="outline-none text-sm flex-1 h-9 text-gray-900 placeholder:text-gray-500 caret-gray-700 bg-white"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onKeyDown}
                 />
                 <button
                   onClick={doSearch}
-                  className="ml-2 text-gray-600 hover:text-gray-900"
+                  className="ml-2 text-white/90 hover:text-white"
                   title="Search"
                   aria-label="Run search"
                 >
@@ -141,13 +139,13 @@ export default function Navbar({ profile }) {
           </div>
 
           {/* RIGHT: Notifications + avatar + logout */}
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex flex-col items-start gap-3 mt-auto w-full">
             {authed && (
               <>
                 <div className="relative" ref={dropdownRef}>
                   <button
                     onClick={() => setOpen((o) => !o)}
-                    className="relative p-2 rounded-full hover:bg-gray-100"
+                    className="relative p-2 rounded-full hover:bg-white/10"
                     title="Notifications"
                     aria-label="Open notifications"
                   >
@@ -192,7 +190,7 @@ export default function Navbar({ profile }) {
                     className="w-8 h-8 rounded-full border"
                   />
                 </Link>
-                <button onClick={handleLogout} className="text-xs text-gray-500 hover:text-gray-700">Logout</button>
+                <button onClick={handleLogout} className="text-xs text-white/80 hover:text-white block">Logout</button>
               </>
             )}
           </div>
