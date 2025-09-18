@@ -81,14 +81,14 @@ export default function Navbar({ profile }) {
   }
 
   return (
-    <nav className="fixed left-0 top-0 h-screen w-60 bg-[#8B4513] text-white z-50 shadow-lg flex flex-col sidebar overflow-hidden">
+    <nav className="fixed left-0 top-0 h-screen w-72 bg-[#8B4513] text-white z-50 shadow-lg flex flex-col sidebar overflow-hidden">
       <div className="px-3 w-full">
         {/* 3-area grid with intrinsic sizing:
             left = auto, center = 1fr, right = auto */}
         <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
           {/* LEFT: Brand + links (scrollable if overflow) */}
           <div className="flex flex-col items-start min-w-0 w-full">
-            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">HandRaise</span>
+            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">Handaise</span>
             <div
               className="flex flex-col gap-1 mt-4"
               style={{ scrollbarWidth: 'none' }}
@@ -112,7 +112,7 @@ export default function Navbar({ profile }) {
           {/* CENTER: Search (stays centered; won’t be pushed by left/right) */}
           <div className="w-full min-w-0">
             {authed && (
-              <div className="flex items-center border rounded-md px-2 py-1 w-full max-w-full">
+              <div className="relative flex items-center border rounded-md px-2 py-1 w-full max-w-full">
                 <input
                   type="text"
                   id="global-search"

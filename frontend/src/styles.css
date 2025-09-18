@@ -3,5 +3,5 @@
 @tailwind utilities;
 
 /* Sidebar + page background adjustments */
-body { padding-left: 15rem; } /* matches w-60 */
+body { padding-left: 18rem; }
 nav.sidebar { background-color: #8B4513; color: #fff; }
