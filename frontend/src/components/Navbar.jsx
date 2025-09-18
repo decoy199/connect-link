@@ -9,7 +9,9 @@ const NavLink = ({ to, children }) => {
   return (
     <Link
       to={to}
-      className={`px-3 py-2 rounded-md text-sm font-medium block w-full text-left ${active ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/10'}`}
+      className={`px-3 py-2 rounded-md text-sm font-medium ${
+        active ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/10'
+      }`}
     >
       {children}
     </Link>
@@ -81,14 +83,14 @@ export default function Navbar({ profile }) {
   }
 
   return (
-    <nav className="fixed left-0 top-0 h-screen w-72 bg-[#8B4513] text-white z-50 shadow-lg flex flex-col sidebar overflow-hidden">
-      <div className="px-3 w-full">
+    <nav className="fixed left-0 top-0 h-screen w-72 bg-[#8B4513] text-white z-50 shadow-lg flex flex-col sidebar">
+      <div className="max-w-6xl mx-auto px-4">
         {/* 3-area grid with intrinsic sizing:
             left = auto, center = 1fr, right = auto */}
-        <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
+        <div className="flex flex-col h-full p-4 gap-4 overflow-visible">
           {/* LEFT: Brand + links (scrollable if overflow) */}
           <div className="flex flex-col items-start min-w-0 w-full">
-            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">Handaise</span>
+            <span className="text-xl font-bold text-white whitespace-nowrap shrink-0">HandRaise</span>
             <div
               className="flex flex-col gap-1 mt-4"
               style={{ scrollbarWidth: 'none' }}
@@ -118,14 +120,14 @@ export default function Navbar({ profile }) {
                   id="global-search"
                   aria-label="Global search"
                   placeholder="Search: keywords, #tags, @username, or names…"
-                  className="outline-none text-sm flex-1 h-9 text-gray-900 placeholder:text-gray-500 caret-gray-700 bg-white"
+                  className="outline-none text-sm flex-1 h-9 pr-10 text-gray-900 placeholder:text-gray-500 caret-gray-700 bg-white"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onKeyDown}
                 />
                 <button
                   onClick={doSearch}
-                  className="ml-2 text-white/90 hover:text-white"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-700 hover:text-gray-900"
                   title="Search"
                   aria-label="Run search"
                 >
@@ -142,10 +144,10 @@ export default function Navbar({ profile }) {
           <div className="flex flex-col items-start gap-3 mt-auto w-full">
             {authed && (
               <>
-                <div className="relative" ref={dropdownRef}>
+                <div className="relative w-full" ref={dropdownRef}>
                   <button
                     onClick={() => setOpen((o) => !o)}
-                    className="relative p-2 rounded-full hover:bg-white/10"
+                    className="relative p-2 rounded-full hover:bg-gray-100"
                     title="Notifications"
                     aria-label="Open notifications"
                   >
@@ -160,7 +162,7 @@ export default function Navbar({ profile }) {
                   </button>
 
                   {open && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white border rounded-xl shadow-lg p-2">
+                    <div className="absolute left-2 right-2 mt-2 z-50 w-[calc(100%-1rem)] bg-white border rounded-xl shadow-lg p-2">
                       <div className="flex items-center justify-between px-2 py-1">
                         <div className="text-sm font-semibold">Notifications</div>
                         <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
@@ -172,9 +174,9 @@ export default function Navbar({ profile }) {
                           <button
                             key={n.id}
                             onClick={() => clickNote(n)}
-                            className={`w-full text-left px-2 py-2 text-sm rounded ${n.read ? 'bg-white' : 'bg-blue-50 hover:bg-blue-100'}`}
+                            className={`w-full text-left px-2 py-2 text-gray-900　text-sm rounded ${n.read ? 'bg-white' : 'bg-blue-50 hover:bg-blue-100'}`}
                           >
-                            <div>{n.message}</div>
+                            <div className="text-gray-900">{n.message}</div>
                             <div className="text-[11px] text-gray-500">{new Date(n.created_at).toLocaleString()}</div>
                           </button>
                         ))}
@@ -190,7 +192,7 @@ export default function Navbar({ profile }) {
                     className="w-8 h-8 rounded-full border"
                   />
                 </Link>
-                <button onClick={handleLogout} className="text-xs text-white/80 hover:text-white block">Logout</button>
+                <button onClick={handleLogout} className="text-xs text-white/80 hover:text-white">Logout</button>
               </>
             )}
           </div>
