@@ -13,6 +13,7 @@ import PointsRewards from './pages/PointsRewards'
 import FAQ from './pages/FAQ'
 import QuestionDetail from './pages/QuestionDetail'
 import Search from './pages/Search'
+import Pokemon from './pages/Pokemon'
 
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         <Route path="/points" element={<ProtectedRoute><PointsRewards /></ProtectedRoute>} />
         <Route path="/faq" element={<ProtectedRoute><FAQ /></ProtectedRoute>} />
+        <Route path="/pokemon" element={<ProtectedRoute><Pokemon /></ProtectedRoute>} />
         <Route path="/questions/:id" element={<ProtectedRoute><QuestionDetail /></ProtectedRoute>} />
         <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
 

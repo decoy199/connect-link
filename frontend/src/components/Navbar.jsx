@@ -101,6 +101,7 @@ export default function Navbar({ profile }) {
                   <NavLink to="/profile">Profile</NavLink>
                   <NavLink to="/points">Points &amp; Rewards</NavLink>
                   <NavLink to="/faq">FAQ</NavLink>
+                  <NavLink to="pokemon">Avatar</NavLink>
                 </>
               ) : (
                 <>
