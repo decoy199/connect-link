@@ -5,9 +5,9 @@ import api from '../api';
 import babyUnicorn from '../components/images/babyUnicorn.png';
 import teenageUnicorn from '../components/images/teenageUnicorn.png';
 import adultUnicorn from '../components/images/adultUnicorn.png';
-// import babyDragon from '../components/images/babyDragon.png';
-// import teenageDragon from '../components/images/teenageDragon.png';
-// import adultDragon from '../components/images/adultDragon.png';
+import babyDragon from '../components/images/babyDragon.png';
+import teenageDragon from '../components/images/teenageDragon.png';
+import adultDragon from '../components/images/adultDragon.png';
 // import babyFox from '../components/images/babyFox.png';
 // import teenageFox from '../components/images/teenageFox.png';
 // import adultFox from '../components/images/adultFox.png';
@@ -50,7 +50,7 @@ export default function PointsRewards() {
     let baby, teenage, adult;
     switch (selectedPokemonType) {
       case 'Dragon': baby = babyDragon; teenage = teenageDragon; adult = adultDragon; break;
-      case 'Fox': baby = babyFox; teenage = teenageFox; adult = adultFox; break;
+      // case 'Fox': baby = babyFox; teenage = teenageFox; adult = adultFox; break; // Uncomment when Fox images are ready
       case 'Unicorn': default: baby = babyUnicorn; teenage = teenageUnicorn; adult = adultUnicorn; break;
     }
     if (totalPoints >= 20) return adult;
@@ -76,12 +76,18 @@ export default function PointsRewards() {
     }
   };
 
+  const imageSizeStyle = {
+    maxWidth: selectedPokemonType === 'Dragon' ? '500px' : '1000px',
+    maxHeight: selectedPokemonType === 'Dragon' ? '500px' : '1000px',
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-4">
       <div className="grid md:grid-cols-[70%_28%] gap-4 mb-4 md:items-stretch">
         {/* Avatar Display Card (Left Column) */}
         <div
           className="rounded-xl shadow p-6 flex flex-col items-center justify-center min-h-[600px] md:h-full"
+          // className="rounded-xl shadow p-6 flex flex-col items-center justify-center h-[750px] md:h-full"
           style={{
             backgroundImage: `url(${forestBackground})`,
             backgroundSize: 'cover',
@@ -96,7 +102,12 @@ export default function PointsRewards() {
                 <img
                   src={getPokemonImage()}
                   alt={getPokemonStage()}
-                  style={{ maxWidth: '1000px', maxHeight: '1000px', objectFit: 'contain', transform: `translateY(${offset}px)`, transition: 'transform 0.2s ease' }}
+                  style={{
+                    ...imageSizeStyle, 
+                    objectFit: 'contain',
+                    transform: `translateY(${offset}px)`,
+                    transition: 'transform 0.2s ease'
+                  }}
                 />
               </div>
               <div className="mt-4 text-center">
