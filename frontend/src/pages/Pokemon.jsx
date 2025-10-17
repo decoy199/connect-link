@@ -8,10 +8,10 @@ import adultUnicorn from '../components/images/adultUnicorn.png';
 import babyDragon from '../components/images/babyDragon.png';
 import teenageDragon from '../components/images/teenageDragon.png';
 import adultDragon from '../components/images/adultDragon.png';
-// import babyFox from '../components/images/babyFox.png';
-// import teenageFox from '../components/images/teenageFox.png';
-// import adultFox from '../components/images/adultFox.png';
-import forestBackground from '../components/images/forest.jpg';
+import babyFox from '../components/images/babyFox.png';
+import teenageFox from '../components/images/teenageFox.png';
+import adultFox from '../components/images/adultFox.png';
+import forestBackground from '../components/images/forest.png';
 
 export default function PointsRewards() {
   const [tx, setTx] = useState([]);
@@ -50,7 +50,7 @@ export default function PointsRewards() {
     let baby, teenage, adult;
     switch (selectedPokemonType) {
       case 'Dragon': baby = babyDragon; teenage = teenageDragon; adult = adultDragon; break;
-      // case 'Fox': baby = babyFox; teenage = teenageFox; adult = adultFox; break; // Uncomment when Fox images are ready
+      case 'Fox': baby = babyFox; teenage = teenageFox; adult = adultFox; break; // Uncomment when Fox images are ready
       case 'Unicorn': default: baby = babyUnicorn; teenage = teenageUnicorn; adult = adultUnicorn; break;
     }
     if (totalPoints >= 20) return adult;
@@ -77,8 +77,8 @@ export default function PointsRewards() {
   };
 
   const imageSizeStyle = {
-    maxWidth: selectedPokemonType === 'Dragon' ? '500px' : '1000px',
-    maxHeight: selectedPokemonType === 'Dragon' ? '500px' : '1000px',
+    maxWidth: selectedPokemonType === 'Unicorn' || selectedPokemonType === 'Dragon' || selectedPokemonType === 'Fox' ? '500px' : '1000px',
+    maxHeight: selectedPokemonType === 'Unicorn' || selectedPokemonType === 'Dragon' || selectedPokemonType === 'Fox' ? '500px' : '1000px',
   };
 
   return (
