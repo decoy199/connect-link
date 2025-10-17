@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
-from django.db.models import Q, Sum, Case, When, IntegerField, Value
+from django.db.models import Q, Sum, Case, When, IntegerField, Value, Count
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
@@ -24,7 +24,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import qrcode
 
 from .models import (
-    Tag, Question, Answer, PointTransaction, Notification, ChatLog,
+    Tag, Question, Answer, PointTransaction, Notification, ChatLog, UserProfile,
     award_points, within_week, DirectQuestion
 )
 from .serializers import (
@@ -33,6 +33,86 @@ from .serializers import (
 )
 
 FRONTEND_BASE_URL = "http://localhost:5175"
+
+FOX_STAGE_CONFIG = [
+    {
+        'level': 1,
+        'key': 'hatchling',
+        'icon': '🌱',
+        'name': 'Hatchling Fox',
+        'english_name': 'Hatchling Fox',
+        'min_points': 0,
+        'summary': 'A newborn mascot curled up beside the keyboard, waiting for its very first points to grow.',
+        'image_url': '/pets/hatchling.png',
+        'prompt': (
+            "A cute tiny baby fox curled up like a fluffy ball, only ears and tail visible, "
+            "sleeping on a desk near a computer monitor. Soft lighting, gentle Ghibli-style, "
+            "pastel color palette, cozy office environment, symbolizing curiosity and new beginnings. "
+            "Corporate mascot style, 3D illustration, high detail."
+        ),
+        'concept': 'A tiny orange-and-white puff curled up near the keyboard with soft monitor glow.',
+    },
+    {
+        'level': 2,
+        'key': 'apprentice',
+        'icon': '🍃',
+        'name': 'Apprentice Fox',
+        'english_name': 'Apprentice Fox',
+        'min_points': 50,
+        'summary': 'The fox is now on its feet with a backpack, eager to learn and collect team points.',
+        'image_url': '/pets/apprentice.png',
+        'prompt': (
+            "A small young fox with bright eyes and a tiny backpack, standing confidently on an office table "
+            "beside notebooks and sticky notes. Ghibli-inspired, warm lighting, clean soft-shaded illustration. "
+            "The fox looks eager to learn, representing collaboration and growth in a company setting."
+        ),
+        'concept': 'Bright fur, tiny backpack, curious expression; collaborative desk scene in warm light.',
+    },
+    {
+        'level': 3,
+        'key': 'helper',
+        'icon': '🔥',
+        'name': 'Helper Fox',
+        'english_name': 'Helper Fox',
+        'min_points': 100,
+        'summary': 'Glasses on, tablet in hand—this fox is actively supporting teammates with knowledge.',
+        'image_url': '/pets/helper.png',
+        'prompt': (
+            "A medium-sized fox wearing round glasses and holding a small digital tablet, helping another small "
+            "creature on the screen. The fox has soft orange fur and glowing eyes. Office background with soft "
+            "bokeh lights. Ghibli aesthetic, semi-realistic cartoon style, symbolizing teamwork and helpfulness."
+        ),
+        'concept': 'More mature look, round glasses, scholar vibes, glowing knowledge orbs floating around.',
+    },
+    {
+        'level': 4,
+        'key': 'sage',
+        'icon': '🌕',
+        'name': 'Sage Fox',
+        'english_name': 'Sage Fox',
+        'min_points': 100,
+        'summary': 'Glasses on, tablet in hand—this fox is actively supporting teammates with knowledge.',
+        'image_url': '/pets/helper.png',
+        'prompt': (
+            "A medium-sized fox wearing round glasses and holding a small digital tablet, helping another small "
+            "creature on the screen. The fox has soft orange fur and glowing eyes. Office background with soft "
+            "bokeh lights. Ghibli aesthetic, semi-realistic cartoon style, symbolizing teamwork and helpfulness."
+        ),
+        'concept': 'More mature look, round glasses, scholar vibes, glowing knowledge orbs floating around.',
+    },
+]
+
+
+def _stage_for_points(points: int):
+    stage = FOX_STAGE_CONFIG[0]
+    next_stage = None
+    for cfg in FOX_STAGE_CONFIG:
+        if points >= cfg['min_points']:
+            stage = cfg
+        else:
+            next_stage = cfg
+            break
+    return stage, next_stage
 
 
 def _token_for_user(user):
@@ -438,6 +518,89 @@ def mark_best(request, aid):
             question=q,
         )
     return Response({'best_answer_id': a.id})
+
+
+# ------------------------ Department pets ------------------------
+
+@api_view(['GET'])
+def department_pets(request):
+    qs = (
+        UserProfile.objects.exclude(department__isnull=True)
+        .exclude(department__exact='')
+        .values('department')
+        .annotate(
+            total_points=Sum('points_balance'),
+            member_count=Count('id'),
+        )
+        .order_by('-total_points', 'department')
+    )
+
+    departments = []
+    for row in qs:
+        dept_name = row['department']
+        total = int(row['total_points'] or 0)
+        member_count = int(row['member_count'] or 0)
+        stage_cfg, next_stage_cfg = _stage_for_points(total)
+        current_min = stage_cfg['min_points']
+        if next_stage_cfg:
+            next_min = next_stage_cfg['min_points']
+            span = max(next_min - current_min, 1)
+            progress_ratio = min(max((total - current_min) / span, 0.0), 1.0)
+            points_to_next = max(next_min - total, 0)
+        else:
+            progress_ratio = 1.0
+            points_to_next = None
+
+        departments.append({
+            'department': dept_name,
+            'member_count': member_count,
+            'total_points': total,
+            'average_points': round(total / member_count, 2) if member_count else 0,
+            'stage': {
+                'level': stage_cfg['level'],
+                'key': stage_cfg['key'],
+                'icon': stage_cfg['icon'],
+                'name': stage_cfg['name'],
+                'english_name': stage_cfg['english_name'],
+                'summary': stage_cfg['summary'],
+                'image_url': stage_cfg.get('image_url', ''),
+                'prompt': stage_cfg['prompt'],
+                'concept': stage_cfg['concept'],
+                'min_points': stage_cfg['min_points'],
+            },
+            'next_stage': None if not next_stage_cfg else {
+                'level': next_stage_cfg['level'],
+                'key': next_stage_cfg['key'],
+                'icon': next_stage_cfg['icon'],
+                'name': next_stage_cfg['name'],
+                'english_name': next_stage_cfg['english_name'],
+                'image_url': next_stage_cfg.get('image_url', ''),
+                'min_points': next_stage_cfg['min_points'],
+            },
+            'points_to_next': points_to_next,
+            'progress_ratio': round(progress_ratio, 4),
+        })
+
+    stages_payload = [
+        {
+            'level': cfg['level'],
+            'key': cfg['key'],
+            'icon': cfg['icon'],
+            'name': cfg['name'],
+            'english_name': cfg['english_name'],
+            'min_points': cfg['min_points'],
+            'image_url': cfg.get('image_url', ''),
+            'summary': cfg['summary'],
+            'prompt': cfg['prompt'],
+            'concept': cfg['concept'],
+        }
+        for cfg in FOX_STAGE_CONFIG
+    ]
+
+    return Response({
+        'departments': departments,
+        'stages': stages_payload,
+    })
 
 
 # ------------------------ Points / QR ------------------------

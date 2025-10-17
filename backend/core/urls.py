@@ -23,6 +23,7 @@ urlpatterns = [
     path('redeem-qr', views.redeem_qr),
     path('log-chat', views.log_chat),
     path('leaderboard', views.leaderboard),
+    path('department-pets', views.department_pets),
 
     # Search (hashtag / username / keyword)
     path('search', views.search),
