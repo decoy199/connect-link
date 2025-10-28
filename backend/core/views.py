@@ -138,6 +138,7 @@ def register(request):
     if not password:
         return Response({'detail': 'username and password required'}, status=400)
 
+    # Generate username
     if username_raw:
         if User.objects.filter(username=username_raw).exists():
             return Response({'detail': 'username already exists'}, status=400)
@@ -153,22 +154,21 @@ def register(request):
             candidate = f"{base}{counter}"
         username = candidate
 
-    # Create user and set names
+    # Create User
     user = User.objects.create_user(username=username, password=password, email=email)
     user.first_name = (data.get('first_name') or '').strip()
     user.last_name = (data.get('last_name') or '').strip()
     user.save()
 
-    # Profile fields
+    # Basic profile fields
     profile = user.profile
     profile.department = data.get('department', '')
     profile.position = data.get('position', '')
     profile.years_experience = int(data.get('years_experience', 0) or 0)
-    # Avatar URL kept for compatibility
-    profile.avatar_url = ''
+    profile.avatar_url = ''  # legacy compatibility
     profile.save()
 
-    # Expertise hashtags
+    # Expertise hashtags -> Tag objects
     raw_tags = data.get('expertise_hashtags', [])
     if isinstance(raw_tags, str):
         raw_tags = [t.strip() for t in raw_tags.split(',')]
@@ -220,6 +220,7 @@ def me(request):
         payload['user'] = user_blk
         return Response(payload)
 
+    # PUT branch
     p = request.user.profile
     p.department = request.data.get('department', p.department)
     p.position   = request.data.get('position', p.position)
@@ -228,6 +229,7 @@ def me(request):
     p.years_experience = int(request.data.get('years_experience', p.years_experience))
     p.avatar_url = request.data.get('avatar_url', p.avatar_url)
 
+    # Update expertise tags
     tags = request.data.get('expertise', [])
     if isinstance(tags, list):
         p.expertise.clear()
@@ -235,12 +237,15 @@ def me(request):
             tag, _ = Tag.objects.get_or_create(name=name.strip().lstrip('#'))
             p.expertise.add(tag)
 
+    # Update first/last name on auth user
     u = request.user
     u.first_name = request.data.get('first_name', u.first_name)
     u.last_name  = request.data.get('last_name',  u.last_name)
     u.save(update_fields=['first_name', 'last_name'])
 
     p.save()
+
+    # Return same shape as GET
     payload = UserProfileSerializer(p).data
     user_blk = payload.get('user') or {}
     user_blk.update({
@@ -262,6 +267,9 @@ def tags(request):
 # ------------------------ Auto award helper ------------------------
 
 def _maybe_auto_award(q: "Question"):
+    """
+    Auto-awards 'best answer' after 24h if the asker didn't choose.
+    """
     if getattr(q, 'auto_awarded', False) or getattr(q, 'best_answer_id', None):
         return
     if timezone.now() - q.created_at < timedelta(hours=24):
@@ -292,14 +300,18 @@ def _maybe_auto_award(q: "Question"):
 @api_view(['GET', 'POST'])
 def questions(request):
     """
-    GET: list public questions
-      - optional ?tag=tagname
-    POST: create a public question
-      - accepts optional recipient_id to assign a single answerer
-      - Anyone can view; only assigned user can answer
-      - Notifications:
-          * urgent + tags -> expertise-matched users
-          * assigned recipient -> “You were assigned …”
+    GET: list public questions (optionally filter by tag)
+    POST: create a new public question
+
+    POST body:
+      {
+        "title": "string (required)",
+        "body": "string",
+        "tags": ["python","react"],
+        "urgent": true/false,
+        "recipient_id": <user id> (optional, assign someone),
+        "anonymous": true/false (if true -> hide my identity)
+      }
     """
     if request.method == 'GET':
         qset = Question.objects.all().order_by('-created_at')
@@ -310,25 +322,29 @@ def questions(request):
             _maybe_auto_award(q)
         return Response(QuestionSerializer(qset, many=True).data)
 
-    # POST
+    # POST branch
     data = request.data
     title = (data.get('title') or '').strip()
     body  = (data.get('body') or '').strip()
     urgent = bool(data.get('urgent', False))
+    anonymous = bool(data.get('anonymous', False))
     tags_in = data.get('tags', [])
     recipient_id = data.get('recipient_id')
 
     if not title:
         return Response({'detail': 'Title is required'}, status=400)
 
+    # If anonymous == True, author is None (null in DB)
+    q_author = None if anonymous else request.user
+
     q = Question.objects.create(
-        author=request.user,
+        author=q_author,
         title=title,
         body=body,
         urgent=urgent,
     )
 
-    # tags
+    # Attach tags
     if isinstance(tags_in, list):
         for t in tags_in:
             tname = str(t).strip().lstrip('#')
@@ -341,7 +357,10 @@ def questions(request):
             tname = raw.lstrip('#')
             tag, _ = Tag.objects.get_or_create(name=tname)
             q.tags.add(tag)
+
     q.save()
+
+    # Award points to the current user (even if they posted anonymously)
     award_points(request.user, 5, 'Posted a question')
 
     # Optional: assigned answerer
@@ -356,7 +375,7 @@ def questions(request):
             assigned_user = None
 
     # Notifications
-    # 1) urgent + tags => expertise match
+    # 1) urgent broadcast to people with matching expertise tags
     if urgent:
         tag_names = list(q.tags.values_list('name', flat=True))
         if tag_names:
@@ -371,7 +390,7 @@ def questions(request):
                     question=q,
                 )
 
-    # 2) assigned recipient gets private-style notification
+    # 2) assigned recipient gets a direct targeted notification
     if assigned_user:
         Notification.objects.create(
             user=assigned_user,
@@ -396,6 +415,7 @@ def question_detail(request, qid):
         _maybe_auto_award(q)
         return Response(QuestionSerializer(q).data)
 
+    # DELETE branch
     if q.author != request.user:
         return Response({'detail': 'Forbidden'}, status=403)
     if timezone.now() - q.created_at > timedelta(minutes=30):
@@ -433,7 +453,7 @@ def answers(request, qid):
     if assigned_id and request.user.id != assigned_id:
         return Response({'detail': 'Only the assigned recipient can answer this question.'}, status=403)
 
-    # Optional rule: one answer per user
+    # Only allow one answer per user
     if Answer.objects.filter(question=q, author=request.user).exists():
         return Response({'detail': 'You already answered this question'}, status=400)
 
@@ -444,7 +464,7 @@ def answers(request, qid):
     a = Answer.objects.create(question=q, author=request.user, body=body)
     award_points(request.user, 10, 'Answered a question')
 
-    # Notify question author
+    # Notify question author (if not anonymous and not yourself)
     if q.author_id and q.author_id != request.user.id:
         Notification.objects.create(
             user=q.author,
@@ -624,7 +644,13 @@ def redeem_qr(request):
         return Response({'detail': 'Invalid amount'}, status=400)
     p.points_balance -= amount
     p.save(update_fields=['points_balance'])
-    PointTransaction.objects.create(user=request.user, amount=-amount, reason='Redeemed at cafeteria')
+
+    PointTransaction.objects.create(
+        user=request.user,
+        amount=-amount,
+        reason='Redeemed at cafeteria'
+    )
+
     payload = f"CONNECTLINK|USER:{request.user.username}|POINTS:{amount}|TS:{timezone.now().isoformat()}"
     img = qrcode.make(payload)
     buf = BytesIO()
@@ -633,7 +659,7 @@ def redeem_qr(request):
     return Response({'qr_data_url': f'data:image/png;base64,{b64}', 'payload': payload})
 
 
-# ------------------------ 1:1 Chat log (kept) ------------------------
+# ------------------------ 1:1 Chat log ------------------------
 
 @api_view(['POST'])
 def log_chat(request):
@@ -642,17 +668,25 @@ def log_chat(request):
         other = User.objects.get(username=other_username)
     except User.DoesNotExist:
         return Response({'detail': 'Other user not found'}, status=404)
+
     last = request.user.chats.filter(other=other).order_by('-created_at').first()
     if last and within_week(last.created_at):
         return Response({'detail': 'Already logged with this person this week'}, status=400)
+
     ChatLog.objects.create(user=request.user, other=other)
     award_points(request.user, 10, 'Logged 1-on-1 chat')
-    if request.user.profile.department and other.profile.department and request.user.profile.department != other.profile.department:
+
+    if (
+        request.user.profile.department and
+        other.profile.department and
+        request.user.profile.department != other.profile.department
+    ):
         award_points(request.user, 15, 'Cross-department bonus')
+
     return Response({'status': 'ok'})
 
 
-# ------------------------ Search (enhanced) ------------------------
+# ------------------------ Search ------------------------
 
 TAG_RE = re.compile(r"#([\w-]+)")
 AT_RE  = re.compile(r"@([\w.-]+)")
@@ -689,7 +723,11 @@ def search(request):
     for at in at_tokens:
         people_q |= Q(username__iexact=at) | Q(username__istartswith=at)
     for kw in keywords:
-        people_q |= Q(username__icontains=kw) | Q(first_name__icontains=kw) | Q(last_name__icontains=kw)
+        people_q |= (
+            Q(username__icontains=kw) |
+            Q(first_name__icontains=kw) |
+            Q(last_name__icontains=kw)
+        )
     if tag_tokens:
         people_q |= Q(profile__expertise__name__in=tag_tokens)
 
@@ -701,16 +739,23 @@ def search(request):
         When(first_name__istartswith=cleaned, then=Value(3)),
         When(last_name__istartswith=cleaned, then=Value(3)),
         When(profile__expertise__name__in=tag_tokens, then=Value(4)),
-        When(Q(username__icontains=cleaned) | Q(first_name__icontains=cleaned) | Q(last_name__icontains=cleaned), then=Value(5)),
+        When(
+            Q(username__icontains=cleaned) |
+            Q(first_name__icontains=cleaned) |
+            Q(last_name__icontains=cleaned),
+            then=Value(5)
+        ),
         default=Value(6),
         output_field=IntegerField()
     )
 
-    people = (User.objects
-              .filter(people_q)
-              .annotate(priority=priority)
-              .distinct()
-              .order_by('priority', 'username')[:100])
+    people = (
+        User.objects
+        .filter(people_q)
+        .annotate(priority=priority)
+        .distinct()
+        .order_by('priority', 'username')[:100]
+    )
 
     # Public questions search
     q_qs = Question.objects.all()
@@ -720,7 +765,9 @@ def search(request):
         q_qs = q_qs.filter(author__username__in=at_tokens)
     for kw in keywords:
         q_qs = q_qs.filter(
-            Q(title__icontains=kw) | Q(body__icontains=kw) | Q(tags__name__icontains=kw)
+            Q(title__icontains=kw) |
+            Q(body__icontains=kw) |
+            Q(tags__name__icontains=kw)
         )
     q_qs = q_qs.distinct().order_by('-created_at')
 
@@ -752,12 +799,17 @@ def notifications_read(request):
 
 @api_view(['GET'])
 def leaderboard(request):
-    data = (User.objects
-            .values('profile__department')
-            .annotate(points=Sum('point_transactions__amount'))
-            .order_by('-points')[:10])
+    data = (
+        User.objects
+        .values('profile__department')
+        .annotate(points=Sum('point_transactions__amount'))
+        .order_by('-points')[:10]
+    )
     return Response([
-        {'department': d['profile__department'] or 'Unknown', 'points': d['points'] or 0}
+        {
+            'department': d['profile__department'] or 'Unknown',
+            'points': d['points'] or 0
+        }
         for d in data
     ])
 
@@ -772,11 +824,13 @@ def _json(request):
 def forgot_password(request):
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
+
     data = _json(request)
     email = data.get("email", "").strip().lower()
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
+        # Return ok even if no such user to avoid leaking existence
         return JsonResponse({"ok": True})
 
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -798,6 +852,7 @@ def forgot_password(request):
 def reset_password(request):
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
+
     data = _json(request)
     uid = data.get("uid")
     token = data.get("token")
@@ -824,12 +879,16 @@ def reset_password(request):
 def forgot_username(request):
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
+
     data = _json(request)
     email = data.get("email", "").strip().lower()
+
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
+        # Also return ok to avoid account enumeration
         return JsonResponse({"ok": True})
+
     send_mail(
         subject="Your username",
         message=f"Your username is: {user.username}",
@@ -840,7 +899,7 @@ def forgot_username(request):
     return JsonResponse({"ok": True})
 
 
-# ------------------------ Direct (private) Questions: list/create ------------------------
+# ------------------------ Direct Questions ------------------------
 
 def _ensure_dq_visible(request, dq: 'DirectQuestion'):
     if request.user.id not in (dq.sender_id, dq.recipient_id):
@@ -851,19 +910,21 @@ def _ensure_dq_visible(request, dq: 'DirectQuestion'):
 @api_view(['GET', 'POST'])
 def direct_questions(request):
     """
-    GET: list my direct questions (sender or recipient)
+    GET: list direct questions (sender or recipient)
     POST: create a new direct question
-      payload: { "recipient_id": int, "title": str, "body"?: str, "tags"?: [str] }
+    body: { "recipient_id": int, "title": str, "body"?: str, "tags"?: [str] }
     """
     if not request.user.is_authenticated:
         return Response({'detail': 'Authentication required'}, status=401)
 
     if request.method == 'GET':
-        items = (DirectQuestion.objects
-                 .filter(Q(sender=request.user) | Q(recipient=request.user))
-                 .select_related('sender', 'recipient')
-                 .prefetch_related('tags')
-                 .order_by('-created_at')[:200])
+        items = (
+            DirectQuestion.objects
+            .filter(Q(sender=request.user) | Q(recipient=request.user))
+            .select_related('sender', 'recipient')
+            .prefetch_related('tags')
+            .order_by('-created_at')[:200]
+        )
 
         def _dq(dq):
             return {
@@ -878,7 +939,7 @@ def direct_questions(request):
 
         return Response({'items': [_dq(d) for d in items]})
 
-    # POST
+    # POST direct question
     data = request.data or {}
     recipient_id = data.get('recipient_id')
     title = (data.get('title') or '').strip()
@@ -928,19 +989,21 @@ def direct_questions(request):
     }, status=201)
 
 
-# ------------------------ Direct (private) Questions: detail ------------------------
-
 @api_view(['GET'])
 def direct_question_detail(request, pk: int):
     """
-    GET a single direct question.
-    Visible ONLY to sender or recipient.
+    GET a single direct question (visible only to sender or recipient)
     """
     if not request.user.is_authenticated:
         return Response({'detail': 'Authentication required'}, status=401)
 
     try:
-        dq = DirectQuestion.objects.select_related('sender', 'recipient').prefetch_related('tags').get(pk=pk)
+        dq = (
+            DirectQuestion.objects
+            .select_related('sender', 'recipient')
+            .prefetch_related('tags')
+            .get(pk=pk)
+        )
     except DirectQuestion.DoesNotExist:
         return Response({'detail': 'Not found'}, status=404)
 
@@ -957,27 +1020,3 @@ def direct_question_detail(request, pk: int):
         'recipient': _user_brief(dq.recipient),
         'created_at': dq.created_at.isoformat(),
     })
-
-
-# ------------------------ Aliases / utilities referenced by urls ------------------------
-
-@api_view(['POST'])
-def notifications_mark_read(request):
-    """
-    Alias for /notifications/read to match references that call a different name.
-    """
-    return notifications_read(request)
-
-
-@api_view(['GET'])
-def ping(request):
-    """
-    Simple health check endpoint.
-    """
-    who = None
-    try:
-        if request.user and request.user.is_authenticated:
-            who = request.user.username
-    except Exception:
-        pass
-    return Response({'ok': True, 'user': who})
