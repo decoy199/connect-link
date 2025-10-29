@@ -1,6 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
 
+// // Mock API
+// const api = {
+//   get: (url) => {
+//     if (url === '/points/transactions') {
+//       return Promise.resolve({
+//         data: [
+//           { amount: 5, description: 'Answered question' },
+//           { amount: 3, description: 'Asked question' }
+//         ]
+//       });
+//     }
+//     return Promise.resolve({ data: null });
+//   }
+// };
+
 // --- Image Imports ---
 import babyUnicorn from '../components/images/babyUnicorn.png';
 import teenageUnicorn from '../components/images/teenageUnicorn.png';
@@ -12,6 +27,20 @@ import babyFox from '../components/images/babyFox.png';
 import teenageFox from '../components/images/teenageFox.png';
 import adultFox from '../components/images/adultFox.png';
 import forestBackground from '../components/images/forest.png';
+import babyUnicornN from '../components/images/babyUnicornN.png';
+import necklaceImg from '../components/images/necklace.png';
+
+// Available accessories catalog
+const ACCESSORIES = [
+  {
+    id: 'necklace',
+    name: 'Star Necklace',
+    cost: 5,
+    image: necklaceImg,
+    description: 'A beautiful holographic star necklace'
+  },
+  // Add more accessories here in the future
+];
 
 export default function PointsRewards() {
   const [tx, setTx] = useState([]);
@@ -19,17 +48,11 @@ export default function PointsRewards() {
   const [offset, setOffset] = useState(0);
   const [selectedPokemonType, setSelectedPokemonType] = useState(null);
   const [isConfirmed, setIsConfirmed] = useState(false);
+  const [ownedAccessories, setOwnedAccessories] = useState([]);
+  const [equippedAccessories, setEquippedAccessories] = useState([]);
+  const [showShop, setShowShop] = useState(false);
 
   useEffect(() => {
-    // In a real app, you would fetch the user's saved choice here and set the state.
-    // For example:
-    // api.get('/user/avatar').then(response => {
-    //   if (response.data.pokemonType) {
-    //     setSelectedPokemonType(response.data.pokemonType);
-    //     setIsConfirmed(true);
-    //   }
-    // });
-
     api.get('/points/transactions').then(r => {
       setTx(r.data);
       const total = r.data.reduce((sum, t) => sum + t.amount, 0);
@@ -48,11 +71,30 @@ export default function PointsRewards() {
 
   const getPokemonImage = () => {
     let baby, teenage, adult;
+    
+    // Check if necklace is equipped and use the necklace version
+    const hasNecklace = equippedAccessories.includes('necklace');
+    
     switch (selectedPokemonType) {
-      case 'Dragon': baby = babyDragon; teenage = teenageDragon; adult = adultDragon; break;
-      case 'Fox': baby = babyFox; teenage = teenageFox; adult = adultFox; break; // Uncomment when Fox images are ready
-      case 'Unicorn': default: baby = babyUnicorn; teenage = teenageUnicorn; adult = adultUnicorn; break;
+      case 'Dragon':
+        baby = babyDragon;
+        teenage = teenageDragon;
+        adult = adultDragon;
+        break;
+      case 'Fox':
+        baby = babyFox;
+        teenage = teenageFox;
+        adult = adultFox;
+        break;
+      case 'Unicorn':
+      default:
+        // Use necklace version if equipped and baby stage
+        baby = hasNecklace ? babyUnicornN : babyUnicorn;
+        teenage = teenageUnicorn;
+        adult = adultUnicorn;
+        break;
     }
+    
     if (totalPoints >= 20) return adult;
     if (totalPoints >= 10) return teenage;
     return baby;
@@ -71,14 +113,36 @@ export default function PointsRewards() {
   const handleConfirm = () => {
     if (selectedPokemonType) {
       setIsConfirmed(true);
-      // In a real app, you would save this choice to the database
-      // api.post('/user/avatar', { pokemonType: selectedPokemonType });
+    }
+  };
+
+  const handleBuyAccessory = (accessory) => {
+    if (totalPoints >= accessory.cost && !ownedAccessories.includes(accessory.id)) {
+      // Deduct points
+      const newTotal = totalPoints - accessory.cost;
+      setTotalPoints(newTotal);
+      
+      // Add to owned accessories
+      setOwnedAccessories([...ownedAccessories, accessory.id]);
+      
+      // Auto-equip the accessory
+      setEquippedAccessories([...equippedAccessories, accessory.id]);
+      
+      // api.post('/user/accessories/buy', { accessoryId: accessory.id });
+    }
+  };
+
+  const toggleEquipAccessory = (accessoryId) => {
+    if (equippedAccessories.includes(accessoryId)) {
+      setEquippedAccessories(equippedAccessories.filter(id => id !== accessoryId));
+    } else {
+      setEquippedAccessories([...equippedAccessories, accessoryId]);
     }
   };
 
   const imageSizeStyle = {
-    maxWidth: selectedPokemonType === 'Unicorn' || selectedPokemonType === 'Dragon' || selectedPokemonType === 'Fox' ? '500px' : '1000px',
-    maxHeight: selectedPokemonType === 'Unicorn' || selectedPokemonType === 'Dragon' || selectedPokemonType === 'Fox' ? '500px' : '1000px',
+    maxWidth: '500px',
+    maxHeight: '500px',
   };
 
   return (
@@ -87,7 +151,6 @@ export default function PointsRewards() {
         {/* Avatar Display Card (Left Column) */}
         <div
           className="rounded-xl shadow p-6 flex flex-col items-center justify-center min-h-[600px] md:h-full"
-          // className="rounded-xl shadow p-6 flex flex-col items-center justify-center h-[750px] md:h-full"
           style={{
             backgroundImage: `url(${forestBackground})`,
             backgroundSize: 'cover',
@@ -182,9 +245,108 @@ export default function PointsRewards() {
                 />
               </div>
             </div>
+            
+            {isConfirmed && (
+              <button
+                onClick={() => setShowShop(true)}
+                className="w-full mt-4 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <span className="text-xl">🛍️</span>
+                Accessory Shop
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Accessory Shop Modal */}
+      {showShop && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-800">Accessory Shop</h2>
+              <button
+                onClick={() => setShowShop(false)}
+                className="text-gray-500 hover:text-gray-700 transition-colors text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-purple-800 font-semibold">Your Points: {totalPoints}</p>
+              </div>
+
+              {/* Accessories Grid */}
+              <div className="grid md:grid-cols-2 gap-6">
+                {ACCESSORIES.map((accessory) => {
+                  const isOwned = ownedAccessories.includes(accessory.id);
+                  const isEquipped = equippedAccessories.includes(accessory.id);
+                  const canAfford = totalPoints >= accessory.cost;
+
+                  return (
+                    <div
+                      key={accessory.id}
+                      className="border-2 rounded-xl p-4 transition-all"
+                      style={{
+                        borderColor: isOwned ? '#10b981' : '#e5e7eb',
+                        backgroundColor: isOwned ? '#f0fdf4' : 'white'
+                      }}
+                    >
+                      <div className="bg-brown-100 rounded-lg p-6 mb-4 flex items-center justify-center" style={{ backgroundColor: '#f5e6d3' }}>
+                        <img
+                          src={accessory.image}
+                          alt={accessory.name}
+                          className="max-w-[120px] max-h-[120px] object-contain"
+                        />
+                      </div>
+                      
+                      <h3 className="font-bold text-lg mb-2">{accessory.name}</h3>
+                      <p className="text-sm text-gray-600 mb-3">{accessory.description}</p>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-lg font-bold text-purple-600">{accessory.cost} Points</span>
+                        {isOwned && (
+                          <span className="text-sm font-semibold text-green-600">✓ Owned</span>
+                        )}
+                      </div>
+
+                      {!isOwned && (
+                        <button
+                          onClick={() => handleBuyAccessory(accessory)}
+                          disabled={!canAfford}
+                          className={`w-full py-2 px-4 rounded-lg font-bold transition-colors ${
+                            canAfford
+                              ? 'bg-purple-600 text-white hover:bg-purple-700'
+                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          }`}
+                        >
+                          {canAfford ? 'Buy Now' : 'Not Enough Points'}
+                        </button>
+                      )}
+
+                      {isOwned && (
+                        <button
+                          onClick={() => toggleEquipAccessory(accessory.id)}
+                          className={`w-full py-2 px-4 rounded-lg font-bold transition-colors ${
+                            isEquipped
+                              ? 'bg-red-500 text-white hover:bg-red-600'
+                              : 'bg-green-600 text-white hover:bg-green-700'
+                          }`}
+                        >
+                          {isEquipped ? 'Unequip' : 'Equip'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
