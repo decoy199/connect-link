@@ -99,7 +99,7 @@ export default function Navbar({ profile }) {
                 <>
                   <NavLink to="/dashboard">Question Dashboard</NavLink>
                   <NavLink to="/profile">Profile</NavLink>
-                  <NavLink to="/points">Points &amp; Rewards</NavLink>
+                  <NavLink to="/points">Points</NavLink>
                   <NavLink to="/pokemon">My Avatar</NavLink>
                   <NavLink to="/pet-lobby">Pet Lobby</NavLink>
                   <NavLink to="/faq">FAQ</NavLink>

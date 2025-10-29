@@ -7,8 +7,8 @@ export default function PointsRewards(){
   return (
     <div className="max-w-4xl mx-auto p-4">
       <div className="bg-white p-4 rounded-xl shadow">
-        <h1 className="text-xl font-semibold mb-3">Points & Rewards</h1>
-        <p className="text-sm text-gray-600 mb-4">Use your points in the company cafeteria by generating a QR code on the dashboard. Below is your transaction history.</p>
+        <h1 className="text-xl font-semibold mb-3">Points</h1>
+        <p className="text-sm text-gray-600 mb-4">Use your points to grow your companion and purchase accessories for them.</p>
         <table className="w-full text-sm">
           <thead><tr className="text-left"><th className="py-2">Date</th><th>Amount</th><th>Reason</th></tr></thead>
           <tbody>

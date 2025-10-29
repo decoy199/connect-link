@@ -1,20 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
-
-// // Mock API
-// const api = {
-//   get: (url) => {
-//     if (url === '/points/transactions') {
-//       return Promise.resolve({
-//         data: [
-//           { amount: 5, description: 'Answered question' },
-//           { amount: 3, description: 'Asked question' }
-//         ]
-//       });
-//     }
-//     return Promise.resolve({ data: null });
-//   }
-// };
+import ChoosePokemonBoard from './choosePokemonBoard';
 
 // --- Image Imports ---
 import babyUnicorn from '../components/images/babyUnicorn.png';
@@ -39,19 +25,44 @@ const ACCESSORIES = [
     image: necklaceImg,
     description: 'A beautiful holographic star necklace'
   },
-  // Add more accessories here in the future
 ];
+
+// Enable testing mode (set to false in production)
+const TESTING_MODE = true;
 
 export default function PointsRewards() {
   const [tx, setTx] = useState([]);
   const [totalPoints, setTotalPoints] = useState(0);
   const [offset, setOffset] = useState(0);
   const [selectedPokemonType, setSelectedPokemonType] = useState(null);
-  const [isConfirmed, setIsConfirmed] = useState(false);
   const [ownedAccessories, setOwnedAccessories] = useState([]);
   const [equippedAccessories, setEquippedAccessories] = useState([]);
   const [showShop, setShowShop] = useState(false);
+  const [showPokemonBoard, setShowPokemonBoard] = useState(false);
 
+  // Load saved data from localStorage on mount
+  useEffect(() => {
+    const savedPokemon = localStorage.getItem('selectedPokemon');
+    const savedAccessories = localStorage.getItem('ownedAccessories');
+    const savedEquipped = localStorage.getItem('equippedAccessories');
+
+    if (savedPokemon) {
+      setSelectedPokemonType(savedPokemon);
+    } else {
+      // First time user - show selection board
+      setShowPokemonBoard(true);
+    }
+
+    if (savedAccessories) {
+      setOwnedAccessories(JSON.parse(savedAccessories));
+    }
+
+    if (savedEquipped) {
+      setEquippedAccessories(JSON.parse(savedEquipped));
+    }
+  }, []);
+
+  // Load points transactions
   useEffect(() => {
     api.get('/points/transactions').then(r => {
       setTx(r.data);
@@ -60,6 +71,7 @@ export default function PointsRewards() {
     });
   }, []);
 
+  // Animation for floating effect
   useEffect(() => {
     let time = 0;
     const animationFrame = setInterval(() => {
@@ -69,10 +81,30 @@ export default function PointsRewards() {
     return () => clearInterval(animationFrame);
   }, []);
 
+  // Save to localStorage when pokemon changes
+  useEffect(() => {
+    if (selectedPokemonType) {
+      localStorage.setItem('selectedPokemon', selectedPokemonType);
+    }
+  }, [selectedPokemonType]);
+
+  // Save accessories to localStorage
+  useEffect(() => {
+    localStorage.setItem('ownedAccessories', JSON.stringify(ownedAccessories));
+  }, [ownedAccessories]);
+
+  useEffect(() => {
+    localStorage.setItem('equippedAccessories', JSON.stringify(equippedAccessories));
+  }, [equippedAccessories]);
+
+  const handlePokemonConfirm = (pokemonType) => {
+    setSelectedPokemonType(pokemonType);
+    setShowPokemonBoard(false);
+  };
+
   const getPokemonImage = () => {
     let baby, teenage, adult;
     
-    // Check if necklace is equipped and use the necklace version
     const hasNecklace = equippedAccessories.includes('necklace');
     
     switch (selectedPokemonType) {
@@ -88,7 +120,6 @@ export default function PointsRewards() {
         break;
       case 'Unicorn':
       default:
-        // Use necklace version if equipped and baby stage
         baby = hasNecklace ? babyUnicornN : babyUnicorn;
         teenage = teenageUnicorn;
         adult = adultUnicorn;
@@ -106,29 +137,37 @@ export default function PointsRewards() {
     return `${stageName} ${selectedPokemonType}`;
   };
 
-  const handlePokemonTypeChange = (event) => {
-    setSelectedPokemonType(event.target.value || null);
-  };
-
-  const handleConfirm = () => {
-    if (selectedPokemonType) {
-      setIsConfirmed(true);
-    }
-  };
-
-  const handleBuyAccessory = (accessory) => {
+  const handleBuyAccessory = async (accessory) => {
     if (totalPoints >= accessory.cost && !ownedAccessories.includes(accessory.id)) {
-      // Deduct points
-      const newTotal = totalPoints - accessory.cost;
-      setTotalPoints(newTotal);
-      
-      // Add to owned accessories
-      setOwnedAccessories([...ownedAccessories, accessory.id]);
-      
-      // Auto-equip the accessory
-      setEquippedAccessories([...equippedAccessories, accessory.id]);
-      
-      // api.post('/user/accessories/buy', { accessoryId: accessory.id });
+      try {
+        // Create a negative transaction for the purchase
+        const purchaseTransaction = {
+          amount: -accessory.cost,
+          description: `Purchased ${accessory.name}`
+        };
+
+        // Send to API to permanently record the transaction
+        // await api.post('/points/transactions', purchaseTransaction);
+
+        // Update local state with the new transaction
+        const updatedTx = [...tx, purchaseTransaction];
+        setTx(updatedTx);
+        
+        // Recalculate total points
+        const newTotal = updatedTx.reduce((sum, t) => sum + t.amount, 0);
+        setTotalPoints(newTotal);
+        
+        // Add to owned accessories
+        setOwnedAccessories([...ownedAccessories, accessory.id]);
+        
+        // Auto-equip the accessory
+        setEquippedAccessories([...equippedAccessories, accessory.id]);
+        
+        // Optionally send to backend to update owned accessories
+        // await api.post('/user/accessories/buy', { accessoryId: accessory.id });
+      } catch (error) {
+        console.error('Error purchasing accessory:', error);
+      }
     }
   };
 
@@ -145,6 +184,11 @@ export default function PointsRewards() {
     maxHeight: '500px',
   };
 
+  // Show Pokemon selection board if needed
+  if (showPokemonBoard) {
+    return <ChoosePokemonBoard onConfirm={handlePokemonConfirm} allowTesting={TESTING_MODE} />;
+  }
+
   return (
     <div className="max-w-6xl mx-auto p-4">
       <div className="grid md:grid-cols-[70%_28%] gap-4 mb-4 md:items-stretch">
@@ -157,74 +201,37 @@ export default function PointsRewards() {
             backgroundPosition: 'center',
           }}
         >
-          {isConfirmed ? (
-            <>
-              <h2 className="text-2xl font-bold text-white mb-2">Your Avatar</h2>
-              <p className="text-lg text-white mb-4">{getPokemonStage()}</p>
-              <div className="relative w-full flex justify-center items-center flex-1">
-                <img
-                  src={getPokemonImage()}
-                  alt={getPokemonStage()}
-                  style={{
-                    ...imageSizeStyle, 
-                    objectFit: 'contain',
-                    transform: `translateY(${offset}px)`,
-                    transition: 'transform 0.2s ease'
-                  }}
-                />
-              </div>
-              <div className="mt-4 text-center">
-                <p className="text-3xl font-bold text-white">{totalPoints} Points</p>
-              </div>
-            </>
-          ) : (
-            <div className="text-center">
-              <div className="bg-black bg-opacity-50 rounded-lg px-8 py-6 backdrop-blur-sm">
-                <h2 className="text-3xl font-bold text-white">Choose Your Companion</h2>
-                <p className="text-white mt-2">Select a Pokémon from the panel to begin your journey!</p>
-              </div>
-            </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Your Avatar</h2>
+          <p className="text-lg text-white mb-4">{getPokemonStage()}</p>
+          <div className="relative w-full flex justify-center items-center flex-1">
+            <img
+              src={getPokemonImage()}
+              alt={getPokemonStage()}
+              style={{
+                ...imageSizeStyle, 
+                objectFit: 'contain',
+                transform: `translateY(${offset}px)`,
+                transition: 'transform 0.2s ease'
+              }}
+            />
+          </div>
+          <div className="mt-4 text-center">
+            <p className="text-3xl font-bold text-white">{totalPoints} Points</p>
+          </div>
+
+          {/* Testing Mode: Change Pokemon Button */}
+          {TESTING_MODE && (
+            <button
+              onClick={() => setShowPokemonBoard(true)}
+              className="mt-4 bg-yellow-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-yellow-600 transition-colors"
+            >
+              🔄 Change Pokemon (Testing)
+            </button>
           )}
         </div>
 
         {/* Right Column Content */}
         <div className="flex flex-col gap-4 h-auto">
-          {!isConfirmed && (
-            <div className="bg-white p-6 rounded-xl shadow">
-              <h2 className="text-xl font-semibold mb-3">Choose Your Avatar</h2>
-              <div>
-                <label htmlFor="pokemon-type-select" className="block text-gray-700 text-sm font-bold mb-2">
-                  Select your one-time companion:
-                </label>
-                <select
-                  id="pokemon-type-select"
-                  value={selectedPokemonType || ''}
-                  onChange={handlePokemonTypeChange}
-                  className="block w-full px-4 py-2 pr-8 leading-tight bg-white border border-gray-300 rounded-lg"
-                >
-                  <option value="" disabled>Select a type...</option>
-                  <option value="Unicorn">Unicorn</option>
-                  <option value="Dragon">Dragon</option>
-                  <option value="Fox">Fox</option>
-                </select>
-              </div>
-
-              {selectedPokemonType && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-sm text-yellow-800">
-                    Are you sure? You can only choose one Pokémon to raise. This choice is permanent!
-                  </p>
-                  <button
-                    onClick={handleConfirm}
-                    className="w-full mt-3 bg-purple-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors"
-                  >
-                    Confirm {selectedPokemonType}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="bg-white p-6 rounded-xl shadow flex-1">
             <h2 className="text-xl font-semibold mb-3">Points Summary</h2>
             <div className="space-y-3 mb-6">
@@ -241,20 +248,23 @@ export default function PointsRewards() {
               <div className="flex-1 bg-gray-200 rounded-full h-3 overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: isConfirmed ? `${Math.min((totalPoints / 20) * 100, 100)}%` : '0%' }}
+                  style={{ width: `${Math.min((totalPoints / 20) * 100, 100)}%` }}
                 />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Baby (0)</span>
+                <span>Teen (10)</span>
+                <span>Adult (20)</span>
               </div>
             </div>
             
-            {isConfirmed && (
-              <button
-                onClick={() => setShowShop(true)}
-                className="w-full mt-4 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
-              >
-                <span className="text-xl">🛍️</span>
-                Accessory Shop
-              </button>
-            )}
+            <button
+              onClick={() => setShowShop(true)}
+              className="w-full mt-4 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+            >
+              <span className="text-xl">🛍️</span>
+              Accessory Shop
+            </button>
           </div>
         </div>
       </div>
@@ -263,7 +273,6 @@ export default function PointsRewards() {
       {showShop && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-800">Accessory Shop</h2>
               <button
@@ -274,13 +283,11 @@ export default function PointsRewards() {
               </button>
             </div>
 
-            {/* Content */}
             <div className="p-6 overflow-y-auto flex-1">
               <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                 <p className="text-purple-800 font-semibold">Your Points: {totalPoints}</p>
               </div>
 
-              {/* Accessories Grid */}
               <div className="grid md:grid-cols-2 gap-6">
                 {ACCESSORIES.map((accessory) => {
                   const isOwned = ownedAccessories.includes(accessory.id);
