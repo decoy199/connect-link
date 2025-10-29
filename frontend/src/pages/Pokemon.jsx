@@ -138,38 +138,48 @@ export default function PointsRewards() {
   };
 
   const handleBuyAccessory = async (accessory) => {
-    if (totalPoints >= accessory.cost && !ownedAccessories.includes(accessory.id)) {
+    // prevent duplicate purchases
+    if (ownedAccessories.includes(accessory.id)) {
+      alert(`You already own the ${accessory.name}!`);
+      return;
+    }
+  
+    // check affordability
+    if (totalPoints >= accessory.cost) {
       try {
-        // Create a negative transaction for the purchase
+        // create a negative transaction for the purchase
         const purchaseTransaction = {
           amount: -accessory.cost,
-          description: `Purchased ${accessory.name}`
+          description: `Purchased ${accessory.name}`,
         };
-
-        // Send to API to permanently record the transaction
-        // await api.post('/points/transactions', purchaseTransaction);
-
-        // Update local state with the new transaction
+  
+  
+        // update local transactions
         const updatedTx = [...tx, purchaseTransaction];
         setTx(updatedTx);
-        
-        // Recalculate total points
+  
+        // recalculate total points
         const newTotal = updatedTx.reduce((sum, t) => sum + t.amount, 0);
         setTotalPoints(newTotal);
-        
-        // Add to owned accessories
-        setOwnedAccessories([...ownedAccessories, accessory.id]);
-        
-        // Auto-equip the accessory
+  
+        // mark as owned
+        const updatedOwned = [...ownedAccessories, accessory.id];
+        setOwnedAccessories(updatedOwned);
+  
+        // auto-equip on purchase
         setEquippedAccessories([...equippedAccessories, accessory.id]);
-        
-        // Optionally send to backend to update owned accessories
+  
+        // optionally persist to backend
         // await api.post('/user/accessories/buy', { accessoryId: accessory.id });
       } catch (error) {
         console.error('Error purchasing accessory:', error);
       }
+    } else {
+      alert("You don't have enough points to buy this accessory.");
     }
   };
+  
+   
 
   const toggleEquipAccessory = (accessoryId) => {
     if (equippedAccessories.includes(accessoryId)) {
