@@ -14,7 +14,7 @@ class Tag(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['name']),
+            models.Index(fields=["name"]),
         ]
 
     def __str__(self) -> str:
@@ -22,13 +22,13 @@ class Tag(models.Model):
 
 
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     department = models.CharField(max_length=100, blank=True)
     position = models.CharField(max_length=100, blank=True)
     bio = models.TextField(blank=True)
     hobbies = models.TextField(blank=True)
     years_experience = models.IntegerField(default=0)
-    expertise = models.ManyToManyField(Tag, related_name='experts', blank=True)
+    expertise = models.ManyToManyField(Tag, related_name="experts", blank=True)
     points_balance = models.IntegerField(default=0)
     # kept for compatibility with older frontends; not required by new UI
     avatar_url = models.URLField(blank=True)
@@ -51,25 +51,44 @@ def _create_user_profile(sender, instance: User, created: bool, **kwargs):
 # ---------------------------
 
 class Question(models.Model):
-    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='questions')
+    # Public-facing author; can be NULL when posted anonymously
+    author = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name="questions"
+    )
+
+    # New: persist the real creator even if anonymous (used for permissions)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="questions_created",
+        help_text="Actual creator (always set), even when author is hidden (anonymous).",
+    )
+
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True)
-    tags = models.ManyToManyField(Tag, blank=True, related_name='questions')
+    tags = models.ManyToManyField(Tag, blank=True, related_name="questions")
     urgent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    best_answer = models.ForeignKey('Answer', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    best_answer = models.ForeignKey(
+        "Answer", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
     auto_awarded = models.BooleanField(default=False)
 
     # Publicly visible but with a restricted answerer (if set)
     assigned_answerer = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_questions'
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_questions",
     )
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['-created_at']),
-            models.Index(fields=['urgent', '-created_at']),
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["urgent", "-created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -77,17 +96,17 @@ class Question(models.Model):
 
 
 class Answer(models.Model):
-    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='answers')
-    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='answers')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="answers")
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="answers")
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    likes = models.ManyToManyField(User, related_name='liked_answers', blank=True)
+    likes = models.ManyToManyField(User, related_name="liked_answers", blank=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['-created_at']),
-            models.Index(fields=['question']),
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["question"]),
         ]
 
     def like_count(self) -> int:
@@ -102,19 +121,19 @@ class Answer(models.Model):
 # ---------------------------
 
 class PointTransaction(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='point_transactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="point_transactions")
     amount = models.IntegerField()
     reason = models.CharField(max_length=200)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=["user", "-created_at"]),
         ]
 
     def __str__(self) -> str:
-        sign = '+' if self.amount >= 0 else ''
+        sign = "+" if self.amount >= 0 else ""
         return f"{self.user.username} {sign}{self.amount} ({self.reason})"
 
 
@@ -123,18 +142,20 @@ class PointTransaction(models.Model):
 # ---------------------------
 
 class Notification(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     message = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
     read = models.BooleanField(default=False)
 
     # Optional link target to a public question (used by the frontend to navigate)
-    question = models.ForeignKey(Question, null=True, blank=True, on_delete=models.CASCADE, related_name='notifications')
+    question = models.ForeignKey(
+        Question, null=True, blank=True, on_delete=models.CASCADE, related_name="notifications"
+    )
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['user', 'read', '-created_at']),
+            models.Index(fields=["user", "read", "-created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -151,19 +172,19 @@ class DirectQuestion(models.Model):
     New "Ask privately but public-visible question with restricted answerer"
     uses Question.assigned_answerer instead.
     """
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='direct_questions_sent')
-    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='direct_questions_received')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="direct_questions_sent")
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="direct_questions_received")
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True)
-    tags = models.ManyToManyField(Tag, blank=True, related_name='direct_questions')
+    tags = models.ManyToManyField(Tag, blank=True, related_name="direct_questions")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['sender']),
-            models.Index(fields=['recipient']),
-            models.Index(fields=['-created_at']),
+            models.Index(fields=["sender"]),
+            models.Index(fields=["recipient"]),
+            models.Index(fields=["-created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -180,22 +201,14 @@ class ChatLog(models.Model):
         request.user.chats.filter(other=other).order_by('-created_at').first()
     so the FK to 'user' must have related_name='chats'.
     """
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='chats'
-    )
-    other = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='chats_with_me'
-    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chats")
+    other = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chats_with_me")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['user', 'other', '-created_at']),
+            models.Index(fields=["user", "other", "-created_at"]),
         ]
 
     def __str__(self) -> str:
@@ -212,7 +225,7 @@ def award_points(user: User, amount: int, reason: str):
     """
     profile = user.profile
     profile.points_balance = (profile.points_balance or 0) + int(amount)
-    profile.save(update_fields=['points_balance'])
+    profile.save(update_fields=["points_balance"])
     PointTransaction.objects.create(user=user, amount=int(amount), reason=str(reason))
 
 

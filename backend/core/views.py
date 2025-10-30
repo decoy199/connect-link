@@ -1,3 +1,12 @@
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return request.user and request.user.is_staff
+
+
 from datetime import timedelta
 from io import BytesIO
 import base64
@@ -15,7 +24,7 @@ from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.views.decorators.csrf import csrf_exempt
 
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -26,10 +35,6 @@ import qrcode
 from .models import (
     Tag, Question, Answer, PointTransaction, Notification, ChatLog, UserProfile,
     award_points, within_week, DirectQuestion
-)
-from .serializers import (
-    UserProfileSerializer, TagSerializer, QuestionSerializer,
-    AnswerSerializer, PointTransactionSerializer, NotificationSerializer
 )
 
 FRONTEND_BASE_URL = "http://localhost:5175"
@@ -120,15 +125,121 @@ def _token_for_user(user):
     return {'access': str(refresh.access_token), 'refresh': str(refresh)}
 
 
+# === Shared helper (question owner) =================================================
+
+def _is_question_owner(user: User, q: "Question") -> bool:
+    """
+    Prefer created_by (real owner). Fall back to author for legacy rows.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    owner_id = getattr(q, "created_by_id", None) or getattr(q, "author_id", None)
+    return owner_id == user.id
+
+
+# ------------------------ Serializers (local) ------------------------
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ["id", "name"]
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "first_name", "last_name"]
+
+
+class UserBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username"]
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    expertise = TagSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = UserProfile
+        fields = [
+            "user",
+            "department",
+            "position",
+            "bio",
+            "hobbies",
+            "years_experience",
+            "expertise",
+            "points_balance",
+        ]
+
+
+class QuestionSerializer(serializers.ModelSerializer):
+    """
+    Exposes:
+      - author: public-facing author (null if anonymous)
+      - assigned_answerer: who is allowed to answer, when set
+      - best_answer_id: id of best answer if selected
+      - mine: True if the current requester is the (real) creator, regardless of anonymity
+    """
+    tags = TagSerializer(many=True, read_only=True)
+    author = UserSerializer(read_only=True)
+    best_answer_id = serializers.IntegerField(source="best_answer.id", read_only=True)
+    assigned_answerer = UserBriefSerializer(read_only=True)
+    mine = serializers.SerializerMethodField()
+
+    def get_mine(self, obj):
+        req = self.context.get("request")
+        if not req or not req.user or not req.user.is_authenticated:
+            return False
+        return (obj.created_by_id == req.user.id) or (obj.author_id == req.user.id)
+
+    class Meta:
+        model = Question
+        fields = [
+            "id",
+            "title",
+            "body",
+            "tags",
+            "urgent",
+            "author",
+            "created_at",
+            "best_answer_id",
+            "auto_awarded",
+            "assigned_answerer",
+            "mine",
+        ]
+
+
+class AnswerSerializer(serializers.ModelSerializer):
+    author = UserSerializer(read_only=True)
+    like_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Answer
+        fields = ["id", "question", "body", "author", "created_at", "like_count"]
+
+
+class PointTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PointTransaction
+        fields = ["id", "amount", "reason", "created_at"]
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    question_id = serializers.IntegerField(source="question.id", read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = ["id", "message", "created_at", "read", "question_id"]
+
+
 # ------------------------ Auth ------------------------
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    """
-    Create user, set profile fields, attach expertise hashtags,
-    and immediately issue JWT (auto-login).
-    """
     data = request.data
 
     username_raw = (data.get('username') or '').strip()
@@ -205,10 +316,6 @@ def login_jwt(request):
 
 @api_view(['GET', 'PUT'])
 def me(request):
-    """
-    GET: return profile + user fields (includes first_name/last_name).
-    PUT: update profile fields and user.first_name/last_name.
-    """
     if request.method == 'GET':
         payload = UserProfileSerializer(request.user.profile).data
         user_blk = payload.get('user') or {}
@@ -267,9 +374,6 @@ def tags(request):
 # ------------------------ Auto award helper ------------------------
 
 def _maybe_auto_award(q: "Question"):
-    """
-    Auto-awards 'best answer' after 24h if the asker didn't choose.
-    """
     if getattr(q, 'auto_awarded', False) or getattr(q, 'best_answer_id', None):
         return
     if timezone.now() - q.created_at < timedelta(hours=24):
@@ -300,27 +404,34 @@ def _maybe_auto_award(q: "Question"):
 @api_view(['GET', 'POST'])
 def questions(request):
     """
-    GET: list public questions (optionally filter by tag)
+    GET: list public questions (optionally filter by tag or department)
     POST: create a new public question
 
-    POST body:
-      {
-        "title": "string (required)",
-        "body": "string",
-        "tags": ["python","react"],
-        "urgent": true/false,
-        "recipient_id": <user id> (optional, assign someone),
-        "anonymous": true/false (if true -> hide my identity)
-      }
+    GET query params:
+      - tag: str (optional)
+      - department: str (optional) — filters by creator's department
     """
     if request.method == 'GET':
         qset = Question.objects.all().order_by('-created_at')
+
+        # Tag filter
         tag = request.GET.get('tag')
         if tag:
             qset = qset.filter(tags__name__iexact=tag.lstrip('#'))
+
+        # Department filter (by created_by OR legacy author)
+        department = (request.GET.get('department') or '').strip()
+        if department:
+            qset = qset.filter(
+                Q(created_by__profile__department__iexact=department) |
+                Q(author__profile__department__iexact=department)
+            )
+
+        # Auto-award pass on first page slice
         for q in qset[:20]:
             _maybe_auto_award(q)
-        return Response(QuestionSerializer(qset, many=True).data)
+
+        return Response(QuestionSerializer(qset, many=True, context={'request': request}).data)
 
     # POST branch
     data = request.data
@@ -334,11 +445,12 @@ def questions(request):
     if not title:
         return Response({'detail': 'Title is required'}, status=400)
 
-    # If anonymous == True, author is None (null in DB)
+    # If anonymous is True, author is None (hidden), but created_by always keeps the real owner.
     q_author = None if anonymous else request.user
 
     q = Question.objects.create(
         author=q_author,
+        created_by=request.user,     # keep the real owner
         title=title,
         body=body,
         urgent=urgent,
@@ -360,10 +472,10 @@ def questions(request):
 
     q.save()
 
-    # Award points to the current user (even if they posted anonymously)
+    # Award points to the poster (even if anonymous)
     award_points(request.user, 5, 'Posted a question')
 
-    # Optional: assigned answerer
+    # Optional assignment
     assigned_user = None
     if recipient_id:
         try:
@@ -375,7 +487,6 @@ def questions(request):
             assigned_user = None
 
     # Notifications
-    # 1) urgent broadcast to people with matching expertise tags
     if urgent:
         tag_names = list(q.tags.values_list('name', flat=True))
         if tag_names:
@@ -390,7 +501,6 @@ def questions(request):
                     question=q,
                 )
 
-    # 2) assigned recipient gets a direct targeted notification
     if assigned_user:
         Notification.objects.create(
             user=assigned_user,
@@ -398,7 +508,7 @@ def questions(request):
             question=q,
         )
 
-    data_out = QuestionSerializer(q).data
+    data_out = QuestionSerializer(q, context={'request': request}).data
     return Response(data_out, status=201)
 
 
@@ -413,10 +523,10 @@ def question_detail(request, qid):
 
     if request.method == 'GET':
         _maybe_auto_award(q)
-        return Response(QuestionSerializer(q).data)
+        return Response(QuestionSerializer(q, context={'request': request}).data)
 
     # DELETE branch
-    if q.author != request.user:
+    if not _is_question_owner(request.user, q):
         return Response({'detail': 'Forbidden'}, status=403)
     if timezone.now() - q.created_at > timedelta(minutes=30):
         return Response({'detail': 'Delete window (30 minutes) has expired'}, status=403)
@@ -453,7 +563,7 @@ def answers(request, qid):
     if assigned_id and request.user.id != assigned_id:
         return Response({'detail': 'Only the assigned recipient can answer this question.'}, status=403)
 
-    # Only allow one answer per user
+    # Only one answer per user
     if Answer.objects.filter(question=q, author=request.user).exists():
         return Response({'detail': 'You already answered this question'}, status=400)
 
@@ -464,7 +574,7 @@ def answers(request, qid):
     a = Answer.objects.create(question=q, author=request.user, body=body)
     award_points(request.user, 10, 'Answered a question')
 
-    # Notify question author (if not anonymous and not yourself)
+    # Notify the question author when visible and not yourself
     if q.author_id and q.author_id != request.user.id:
         Notification.objects.create(
             user=q.author,
@@ -526,7 +636,7 @@ def mark_best(request, aid):
     except Answer.DoesNotExist:
         return Response({'detail': 'Not found'}, status=404)
     q = a.question
-    if q.author != request.user:
+    if not _is_question_owner(request.user, q):
         return Response({'detail': 'Only the asker can select best answer'}, status=403)
     q.best_answer = a
     q.save(update_fields=['best_answer'])
@@ -540,7 +650,7 @@ def mark_best(request, aid):
     return Response({'best_answer_id': a.id})
 
 
-# ------------------------ Department pets ------------------------
+# ------------------------ Department Pets ------------------------
 
 @api_view(['GET'])
 def department_pets(request):
@@ -623,7 +733,23 @@ def department_pets(request):
     })
 
 
-# ------------------------ Points / QR ------------------------
+# ------------------------ Simple Lists / Utilities ------------------------
+
+@api_view(['GET'])
+def departments(request):
+    """
+    Return list of distinct, non-empty department names.
+    """
+    names = (
+        UserProfile.objects
+        .exclude(department__isnull=True)
+        .exclude(department__exact='')
+        .values_list('department', flat=True)
+        .distinct()
+        .order_by('department')
+    )
+    return Response({'items': list(names)})
+
 
 @api_view(['GET'])
 def points_balance(request):
@@ -773,7 +899,7 @@ def search(request):
 
     return Response({
         'people': [_user_brief(u) for u in people],
-        'questions': QuestionSerializer(q_qs, many=True).data
+        'questions': QuestionSerializer(q_qs, many=True, context={'request': request}).data
     })
 
 
@@ -830,7 +956,6 @@ def forgot_password(request):
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
-        # Return ok even if no such user to avoid leaking existence
         return JsonResponse({"ok": True})
 
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -886,7 +1011,6 @@ def forgot_username(request):
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
-        # Also return ok to avoid account enumeration
         return JsonResponse({"ok": True})
 
     send_mail(
@@ -1020,3 +1144,81 @@ def direct_question_detail(request, pk: int):
         'recipient': _user_brief(dq.recipient),
         'created_at': dq.created_at.isoformat(),
     })
+
+
+# ------------------------ Quiz endpoints ------------------------
+from django.utils import timezone
+from django.db.models import Q
+
+QUIZ_MIN_AGE_SECONDS = 5 * 60  # 5 minutes
+
+
+@api_view(['GET'])
+def quiz_pending(request):
+    """Return one quiz candidate: question older than 5 minutes with answers.
+    If best answer is missing, pick the most-liked (fallback: most-recent) as best.
+    """
+    cutoff = timezone.now() - timezone.timedelta(seconds=QUIZ_MIN_AGE_SECONDS)
+    # Prefer ones with explicit best answer; otherwise allow any with >=1 answer
+    q = (Question.objects
+         .filter(created_at__lte=cutoff)
+         .order_by('-created_at')
+         .first())
+    if not q:
+        return Response({}, status=200)
+
+    answers = list(q.answers.all().order_by('-created_at'))
+    if not answers:
+        return Response({}, status=200)
+
+    # Determine best: explicit > most likes > most recent
+    best_id = q.best_answer_id
+    if best_id is None and answers:
+        # pick by likes
+        answers_sorted = sorted(answers, key=lambda a: (a.likes.count(), a.created_at), reverse=True)
+        best_id = answers_sorted[0].id if answers_sorted else None
+
+    out_answers = [{
+        'id': a.id,
+        'text': a.body,
+        'is_best': (best_id == a.id),
+        'upvotes': a.likes.count(),
+    } for a in answers]
+
+    payload = {
+        'question': {
+            'id': q.id,
+            'title': q.title,
+            'body': q.body,
+            'created_at': q.created_at,
+        },
+        'answers': out_answers,
+        'best_answer_id': best_id,
+    }
+    return Response(payload)
+
+
+@api_view(['POST'])
+def quiz_submit(request):
+    """Validate submitted answer and optionally award points."""
+    try:
+        qid = int(request.data.get('question_id'))
+        aid = int(request.data.get('answer_id'))
+    except Exception:
+        return Response({'detail': 'Invalid payload'}, status=400)
+
+    try:
+        q = Question.objects.get(id=qid)
+    except Question.DoesNotExist:
+        return Response({'detail': 'Question not found'}, status=404)
+
+    correct = (q.best_answer_id == aid)
+    awarded = 0
+    if correct and request.user and request.user.is_authenticated:
+        try:
+            award_points(request.user, 10, 'quiz-correct')
+            awarded = 10
+        except Exception:
+            awarded = 0
+
+    return Response({'correct': bool(correct), 'points_awarded': awarded})

@@ -1,12 +1,13 @@
 // src/pages/Dashboard.jsx
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api'
+import QuizPopup from '../components/QuizPopup'
 
 // Format timestamp for display
 const fmt = (s) => new Date(s).toLocaleString()
 
-// Check if something happened within the last 30 minutes
+// Within the last 30 minutes?
 const within30m = (iso) =>
   (Date.now() - new Date(iso).getTime()) <= 30 * 60 * 1000
 
@@ -21,32 +22,91 @@ function Toast({ show, children }) {
   )
 }
 
+/** Track my posted question ids locally (defense-in-depth). */
+const MY_Q_IDS_KEY = 'my_q_ids'
+const keyFor = (username) => `${MY_Q_IDS_KEY}:${username || 'unknown'}`
+function getMyQuestionIds(username) {
+  try {
+    const raw = localStorage.getItem(MY_Q_IDS_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr : []
+  } catch {
+    return []
+  }
+}
+function addMyQuestionId(id,username) {
+  if (!id) return
+  const arr = getMyQuestionIds()
+  if (!arr.includes(id)) {
+    arr.push(id)
+    try { localStorage.setItem(MY_Q_IDS_KEY, JSON.stringify(arr)) } catch {}
+  }
+}
+
+// Helper to build querystring
+function qs(params) {
+  const sp = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return
+    if (typeof v === 'string' && v.trim() === '') return
+    sp.set(k, String(v))
+  })
+  const s = sp.toString()
+  return s ? `?${s}` : ''
+}
+
 export default function Dashboard() {
   const [questions, setQ] = useState([])
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [tags, setTags] = useState('')
   const [urgent, setUrgent] = useState(false)
-
-  // NEW: should this post be anonymous?
   const [postAnonymous, setPostAnonymous] = useState(true)
 
   const [suggest, setSuggest] = useState([])
   const [me, setMe] = useState(null)
   const [postedInfo, setPostedInfo] = useState('')
 
+  // NEW: department filter state
+  const [departments, setDepartments] = useState([])
+  const [selectedDept, setSelectedDept] = useState('')
+  const [loadingDepts, setLoadingDepts] = useState(false)
+
   const suggestTimer = useRef(null)
 
-  // Load latest questions
+  // Load departments once
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      setLoadingDepts(true)
+      try {
+        const { data } = await api.get('/departments')
+        if (!cancelled) setDepartments(data?.items || [])
+      } catch {
+        if (!cancelled) setDepartments([])
+      } finally {
+        if (!cancelled) setLoadingDepts(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [])
+
+  // Load questions (obeys department filter)
   const load = async () => {
-    const { data } = await api.get('/questions')
+    const { data } = await api.get('/questions' + qs({
+      department: selectedDept || undefined,
+    }))
     setQ(data)
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [selectedDept])
 
-  // Load my profile (used for username checks, etc.)
+  // Load my profile
   useEffect(() => {
-    api.get('/me').then(r => setMe(r.data)).catch(() => {})
+    api.get('/me').then(r => {
+      setMe(r.data)
+      try { localStorage.removeItem(MY_Q_IDS_KEY) } catch {}
+    })
   }, [])
 
   // Post a new question
@@ -55,33 +115,34 @@ export default function Dashboard() {
       .map(s => s.trim())
       .filter(Boolean)
 
-    await api.post('/questions', {
-      title,
-      body,
-      tags: tagArr,
-      urgent,
-      anonymous: postAnonymous, // <-- tell backend if anonymous
-    })
+    try {
+      const { data } = await api.post('/questions', {
+        title,
+        body,
+        tags: tagArr,
+        urgent,
+        anonymous: postAnonymous,
+      })
+      const createdId = data?.id ?? data?.question?.id
+      if (createdId) addMyQuestionId(createdId, me?.user?.username)
 
-    // Reset form
-    setTitle('')
-    setBody('')
-    setTags('')
-    setUrgent(false)
-    setPostAnonymous(true)
-    setSuggest([])
+    } finally {
+      setTitle('')
+      setBody('')
+      setTags('')
+      setUrgent(false)
+      setPostAnonymous(true)
+      setSuggest([])
+      load()
 
-    // Reload list
-    load()
-
-    // Show temporary toast if urgent (because we pinged experts)
-    if (urgent) {
-      setPostedInfo('Notifications were sent to users with matching tags.')
-      setTimeout(() => setPostedInfo(''), 4000)
+      if (urgent) {
+        setPostedInfo('Notifications were sent to users with matching tags.')
+        setTimeout(() => setPostedInfo(''), 4000)
+      }
     }
   }
 
-  // Debounced suggestion for similar questions
+  // Debounced suggestions
   const onTitleChange = (v) => {
     setTitle(v)
     const t = v.trim()
@@ -89,25 +150,45 @@ export default function Dashboard() {
     if (!t) { setSuggest([]); return }
     suggestTimer.current = setTimeout(async () => {
       try {
-        const { data } = await api.get('/questions/suggest', {
-          params: { title: t }
-        })
+        const { data } = await api.get('/questions/suggest', { params: { title: t } })
         setSuggest(data || [])
       } catch {
         setSuggest([])
       }
     }, 200)
   }
-
   useEffect(() => () => {
     if (suggestTimer.current) clearTimeout(suggestTimer.current)
   }, [])
 
   const onDeleted = () => load()
+  const hasDeptFilter = useMemo(() => selectedDept.trim().length > 0, [selectedDept])
 
   return (
     <div className="max-w-6xl mx-auto p-4">
+      <QuizPopup />
+
       <Toast show={!!postedInfo}>{postedInfo}</Toast>
+
+      {/* Department filter */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label htmlFor="dept" className="text-sm font-medium">Filter by department</label>
+        <select
+          id="dept"
+          value={selectedDept}
+          onChange={(e) => setSelectedDept(e.target.value)}
+          className="w-full max-w-xs rounded-xl border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          disabled={loadingDepts}
+        >
+          <option value="">All departments</option>
+          {departments.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+        {hasDeptFilter && (
+          <span className="text-xs text-gray-600">Showing posts from <b>{selectedDept}</b></span>
+        )}
+      </div>
 
       <div className="grid md:grid-cols-3 gap-4">
         {/* LEFT / MAIN COLUMN */}
@@ -187,6 +268,7 @@ export default function Dashboard() {
                 key={q.id}
                 q={q}
                 meUsername={me?.user?.username}
+                meUserId={me?.user?.id}
                 onDeleted={onDeleted}
               />
             ))}
@@ -204,8 +286,7 @@ export default function Dashboard() {
   )
 }
 
-// One question card containing the question and its answers
-function QuestionCard({ q, meUsername, onDeleted }) {
+function QuestionCard({ q, meUsername, meUserId, onDeleted }) {
   const [answers, setA] = React.useState([])
   const [body, setBody] = React.useState('')
   const [likes, setLikes] = React.useState({})
@@ -215,9 +296,7 @@ function QuestionCard({ q, meUsername, onDeleted }) {
   const [errorMsg, setErrorMsg] = React.useState('')
   const nav = useNavigate()
 
-  // Helper: figure out how to display the question author
-  // - If q.author == null -> "Anonymous"
-  // - Else prefer first_name + last_name; fallback to username
+  // Display author name (author is null when anonymous)
   const authorName = (() => {
     if (!q.author) return 'Anonymous'
     const fn = q.author.first_name?.trim()
@@ -234,18 +313,39 @@ function QuestionCard({ q, meUsername, onDeleted }) {
   }
   useEffect(() => { load() }, [])
 
-  // Check if this question is "assigned" to a specific answerer
+  // Assignment guard
   const assigned = q.assigned_answerer || null
   const isAssignedGuardActive = !!assigned && !!meUsername && assigned.username !== meUsername
   const assignedLabel = assigned ? `Assigned: @${assigned.username}` : null
 
-  // Submit a new answer
+  // Server says if this question is mine. Fallback: localStorage.
+  const localMine = (() => {
+    try {
+      return getMyQuestionIds(meUsername).includes(q.id)
+
+    } catch { return false }
+  })()
+  const isOwnerQ = !!(q.mine || localMine)
+
+  // Disable answering when guard is active or when it's my own question
+  const isAnswerDisabled = isAssignedGuardActive || isOwnerQ
+
   const submit = async () => {
     setErrorMsg('')
+
+    if (isOwnerQ) {
+      setErrorMsg("You can't answer your own question.")
+      return
+    }
+    if (isAssignedGuardActive) {
+      setErrorMsg(`Only @${assigned.username} can answer this question.`)
+      return
+    }
+
     try {
       await api.post(`/questions/${q.id}/answers`, { body })
       setBody('')
-      load()
+      await load()
       setSentOK(true)
       setTimeout(() => setSentOK(false), 2000)
     } catch (e) {
@@ -264,10 +364,14 @@ function QuestionCard({ q, meUsername, onDeleted }) {
     }
   }
 
-  // Mark best answer
+  // Mark best answer (only owner)
   const markBest = async (aid) => {
-    await api.post(`/answers/${aid}/mark-best`)
-    load()
+    try {
+      await api.post(`/answers/${aid}/mark-best`)
+      load()
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to mark best')
+    }
   }
 
   // Edit answer flow
@@ -297,7 +401,6 @@ function QuestionCard({ q, meUsername, onDeleted }) {
   }
 
   // Delete question (owner-only, and only within 30 minutes)
-  const isOwnerQ = meUsername && q.author && q.author.username === meUsername
   const canDeleteQ = isOwnerQ && within30m(q.created_at)
   const removeQuestion = async () => {
     if (!confirm('Delete this question? This cannot be undone.')) return
@@ -441,10 +544,15 @@ function QuestionCard({ q, meUsername, onDeleted }) {
         })}
       </div>
 
-      {/* Assigned-answerer guard */}
+      {/* Guards */}
       {isAssignedGuardActive && (
         <div className="mt-2 text-sm rounded bg-orange-50 border border-orange-200 text-orange-700 px-3 py-2">
           Only <b>@{assigned.username}</b> can answer this question.
+        </div>
+      )}
+      {isOwnerQ && (
+        <div className="mt-2 text-sm rounded bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2">
+          You can't answer your own question.
         </div>
       )}
 
@@ -455,16 +563,14 @@ function QuestionCard({ q, meUsername, onDeleted }) {
           placeholder="Write an answer..."
           value={body}
           onChange={e => setBody(e.target.value)}
-          disabled={isAssignedGuardActive}
+          disabled={isAnswerDisabled}
         />
         <button
           onClick={submit}
           className={`px-3 rounded text-white ${
-            isAssignedGuardActive
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-gray-800'
+            isAnswerDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-800'
           }`}
-          disabled={isAssignedGuardActive}
+          disabled={isAnswerDisabled}
         >
           Send
         </button>
@@ -499,9 +605,7 @@ function PointsWidget() {
       points: Number(amt),
     })
     setQR(data.qr_data_url)
-    api
-      .get('/points/balance')
-      .then(r => setBal(r.data.points_balance))
+    api.get('/points/balance').then(r => setBal(r.data.points_balance))
   }
 
   return (
@@ -545,10 +649,7 @@ function Leaderboard() {
       <div className="font-semibold mb-2">Department Leaderboard</div>
       <ul className="text-sm">
         {rows.map((r, i) => (
-          <li
-            key={i}
-            className="flex justify-between py-1"
-          >
+          <li key={i} className="flex justify-between py-1">
             <span>{i + 1}. {r.department}</span>
             <span className="font-semibold">{r.points}</span>
           </li>
@@ -561,7 +662,6 @@ function Leaderboard() {
 function Notifications() {
   const [rows, setRows] = useState([])
 
-  // Filters for notification types
   const [onlyUrgentWithTags, setOnlyUrgentWithTags] = useState(false)
   const [onlyPrivateAssigned, setOnlyPrivateAssigned] = useState(false)
 
@@ -578,13 +678,11 @@ function Notifications() {
     return () => clearInterval(id)
   }, [])
 
-  // Mark all notifications read
   const markAllRead = async () => {
     try {
       await api.post('/notifications/read')
       load()
     } catch (e) {
-      // Fallback to legacy path if needed
       if (e?.response?.status === 404) {
         try {
           await api.post('/notifications_read')
@@ -596,7 +694,6 @@ function Notifications() {
     }
   }
 
-  // Filter notifications based on toggles
   const filtered = rows.filter(n => {
     const msg = String(n.message || '')
     const isUrgent = msg.startsWith('URGENT:')
@@ -623,9 +720,7 @@ function Notifications() {
           <input
             type="checkbox"
             checked={onlyUrgentWithTags}
-            onChange={e =>
-              setOnlyUrgentWithTags(e.target.checked)
-            }
+            onChange={e => setOnlyUrgentWithTags(e.target.checked)}
           />
           Urgent + related hashtags
         </label>
@@ -634,9 +729,7 @@ function Notifications() {
           <input
             type="checkbox"
             checked={onlyPrivateAssigned}
-            onChange={e =>
-              setOnlyPrivateAssigned(e.target.checked)
-            }
+            onChange={e => setOnlyPrivateAssigned(e.target.checked)}
           />
           Private/assigned only
         </label>
@@ -646,48 +739,26 @@ function Notifications() {
         {filtered.map(n => (
           <li
             key={n.id}
-            className={`border rounded p-2 ${
-              n.read ? 'bg-white' : 'bg-blue-50'
-            } cursor-pointer hover:bg-blue-100`}
-            onClick={() => {
-              if (n.question_id)
-                nav(`/questions/${n.question_id}`)
-            }}
-            title={
-              n.question_id ? 'Open question' : undefined
-            }
+            className={`border rounded p-2 ${n.read ? 'bg-white' : 'bg-blue-50'} cursor-pointer hover:bg-blue-100`}
+            onClick={() => { if (n.question_id) nav(`/questions/${n.question_id}`) }}
+            title={n.question_id ? 'Open question' : undefined}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div>{n.message}</div>
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
-                  {String(n.message || '').startsWith(
-                    'You were assigned'
-                  ) && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border">
-                      private
-                    </span>
+                  {String(n.message || '').startsWith('You were assigned') && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border">private</span>
                   )}
-
-                  {String(n.message || '').startsWith(
-                    'URGENT:'
-                  ) && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">
-                      urgent
-                    </span>
+                  {String(n.message || '').startsWith('URGENT:') && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">urgent</span>
                   )}
-
                   {n.question_id && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border">
-                      question #{n.question_id}
-                    </span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full border">question #{n.question_id}</span>
                   )}
                 </div>
               </div>
-
-              <div className="shrink-0 text-[11px] text-gray-500">
-                {fmt(n.created_at)}
-              </div>
+              <div className="shrink-0 text-[11px] text-gray-500">{fmt(n.created_at)}</div>
             </div>
           </li>
         ))}
