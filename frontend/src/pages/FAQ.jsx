@@ -1,8 +1,132 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+
+/**
+ 
+ */
+function FlowIn({ as: Tag = 'div', className = '', delay = 0, direction = 'up', children }) {
+  const ref = useRef(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (mql.matches) { setVisible(true); return }
+
+    const io = new IntersectionObserver(
+      entries => {
+        entries.forEach(e => {
+          if (e.isIntersecting) {
+            const t = window.setTimeout(() => setVisible(true), delay)
+            io.disconnect()
+            return () => window.clearTimeout(t)
+          }
+        })
+      },
+      { threshold: 0.1 }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [delay])
+
+  const base = 'transition-all duration-700 will-change-transform'
+  const hiddenAxis =
+    direction === 'left' ? '-translate-x-6'
+    : direction === 'right' ? 'translate-x-6'
+    : 'translate-y-3'
+  const hidden = `opacity-0 ${hiddenAxis}`
+  const shown  = 'opacity-100 translate-x-0 translate-y-0'
+  const cls    = `${base} ${visible ? shown : hidden} ${className}`
+
+  return (
+    <Tag ref={ref} className={cls}>
+      {children}
+    </Tag>
+  )
+}
+
+
+function TypingLine({
+  children,
+  className = '',
+  delay = 0,          // ms
+  duration = 2000,    // ms
+  cursorWidth = 2,    // px
+  cursorColor = '#111',
+  mono = false,       // 
+}) {
+  const ref = useRef(null)
+  const [run, setRun] = useState(false)
+
+  
+  const text = typeof children === 'string' ? children : ''
+  const steps = Math.max(10, Math.ceil(text.length * 0.9))
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (mql.matches) { setRun(true); return }
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        entries.forEach(e => {
+          if (e.isIntersecting) {
+            const t = window.setTimeout(() => setRun(true), delay)
+            obs.disconnect()
+            return () => window.clearTimeout(t)
+          }
+        })
+      },
+      { threshold: 0.01 }
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [delay])
+
+  return (
+    <div
+      ref={ref}
+      className={`overflow-hidden whitespace-nowrap ${className}`}
+      style={{ borderRightWidth: run ? cursorWidth : 0, borderRightColor: cursorColor }}
+    >
+      <span
+        className={`${mono ? 'font-mono' : ''} inline-block will-change-transform`}
+        style={{
+          
+          width: run ? undefined : 0,
+          visibility: run ? 'visible' : 'hidden',
+          
+          animation: run
+            ? `typing ${duration}ms steps(${steps}) both, blink .7s step-end infinite`
+            : 'none',
+          borderRightWidth: cursorWidth,
+          borderRightStyle: 'solid',
+          borderRightColor: cursorColor,
+        }}
+      >
+        {children}
+      </span>
+
+      {/* key from */}
+      <style>{`
+        @keyframes typing {
+          0%   { width: 0 }
+          100% { width: 100% }
+        }
+        @keyframes blink {
+          0%, 100% { border-color: ${cursorColor} }
+          50%      { border-color: transparent }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          span[style*="animation"] { animation: none !important; width: auto !important; visibility: visible !important; }
+        }
+      `}</style>
+    </div>
+  )
+}
 
 export default function FAQ() {
-  // This small FAQ list was originally in your component.
-  // We'll keep it and show it at the bottom under "Quick questions".
   const faqs = [
     {
       q: 'How do I ask anonymously?',
@@ -18,28 +142,42 @@ export default function FAQ() {
     },
   ]
 
+  const headerLines = [
+    'This page explains:',
+    '• What this platform is for',
+    '• How to ask / answer',
+    '• How points work',
+    '• How to redeem rewards using QR codes',
+  ]
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
-      {/* Page header */}
-      <div className="bg-white p-5 rounded-xl shadow">
-        <h1 className="text-2xl font-semibold mb-2">
-          Welcome! How to Use This Platform & How Points Work
-        </h1>
-        <p className="text-gray-600 text-sm">
-          This page explains:
-          <br />
-          • What this platform is for
-          <br />
-          • How to ask / answer
-          <br />
-          • How points work
-          <br />
-          • How to redeem rewards using QR codes
-        </p>
+      
+      <div className="rounded-xl shadow bg-gradient-to-tr from-indigo-900 to-blue-700 p-6">
+        <FlowIn direction="left">
+          <h1 className="text-white text-2xl md:text-3xl font-bold mb-3">
+            Welcome! How to Use This Platform & How Points Work
+          </h1>
+        </FlowIn>
+
+        <div className="text-white/95 text-sm space-y-1">
+          {headerLines.map((line, i) => (
+            <TypingLine
+              key={i}
+              delay={200 + i * 200}
+              duration={1600}
+              cursorWidth={3}
+              cursorColor="#fff"
+              className="pr-2"
+            >
+              {line}
+            </TypingLine>
+          ))}
+        </div>
       </div>
 
       {/* 1. What is this platform? */}
-      <section className="bg-white p-5 rounded-xl shadow">
+      <FlowIn as="section" className="bg-white p-5 rounded-xl shadow" delay={50}>
         <h2 className="text-xl font-semibold mb-3">
           1. What is this platform?
         </h2>
@@ -54,10 +192,10 @@ export default function FAQ() {
           <li>Earn points when you help others.</li>
           <li>Redeem your points for rewards. A QR code will be generated for you.</li>
         </ul>
-      </section>
+      </FlowIn>
 
       {/* 2. Basic workflow */}
-      <section className="bg-white p-5 rounded-xl shadow">
+      <FlowIn as="section" className="bg-white p-5 rounded-xl shadow" delay={90}>
         <h2 className="text-xl font-semibold mb-3">
           2. How do I use it? (Basic workflow)
         </h2>
@@ -80,10 +218,10 @@ export default function FAQ() {
             to other people’s questions, you earn points and recognition.
           </li>
         </ol>
-      </section>
+      </FlowIn>
 
-      {/* 3. Direct Question / anonymous question */}
-      <section className="bg-white p-5 rounded-xl shadow">
+      {/* 3. Direct / private / anonymous */}
+      <FlowIn as="section" className="bg-white p-5 rounded-xl shadow" delay={130}>
         <h2 className="text-xl font-semibold mb-3">
           3. Direct / private / anonymous questions
         </h2>
@@ -109,10 +247,10 @@ export default function FAQ() {
           Tip: Public questions are still better for general topics, because
           they stay searchable and help future teammates.
         </p>
-      </section>
+      </FlowIn>
 
       {/* 4. Points system */}
-      <section className="bg-slate-50 border border-slate-200 p-5 rounded-xl shadow">
+      <FlowIn as="section" className="bg-slate-50 border border-slate-200 p-5 rounded-xl shadow" delay={170}>
         <h2 className="text-xl font-semibold mb-3">
           4. How do points work?
         </h2>
@@ -144,10 +282,10 @@ export default function FAQ() {
           the leaderboard. The leaderboard highlights people who are actively
           helping the team.
         </p>
-      </section>
+      </FlowIn>
 
       {/* 5. Redeeming points */}
-      <section className="bg-amber-50 border border-amber-300 p-5 rounded-xl shadow">
+      <FlowIn as="section" className="bg-amber-50 border border-amber-300 p-5 rounded-xl shadow" delay={210}>
         <h2 className="text-xl font-semibold mb-3">
           5. How do I redeem my points?
         </h2>
@@ -181,8 +319,6 @@ export default function FAQ() {
           </li>
         </ol>
 
-        
-
         <h3 className="text-base font-medium mt-4 mb-2">
           Typical reward examples:
         </h3>
@@ -198,63 +334,29 @@ export default function FAQ() {
           Rewards and point costs may change depending on your team or HR
           policy. Please follow your internal rules.
         </p>
-      </section>
+      </FlowIn>
 
       {/* 6. General FAQ / quick questions */}
-      <section className="bg-white p-5 rounded-xl shadow">
+      <FlowIn as="section" className="bg-white p-5 rounded-xl shadow" delay={250}>
         <h2 className="text-xl font-semibold mb-4">
           6. Quick questions (FAQ)
         </h2>
 
         <div className="space-y-4">
-          {/* Dynamic list from the original component */}
           {faqs.map((f, i) => (
-            <div key={i} className="border-b border-gray-200 pb-3">
+            <FlowIn key={i} className="border-b border-gray-200 pb-3" delay={i * 70}>
               <div className="font-medium text-gray-900">{f.q}</div>
               <div className="text-sm text-gray-600">{f.a}</div>
-            </div>
+            </FlowIn>
           ))}
-
-          {/* Extra common questions from the long explanation */}
-          <div className="border-b border-gray-200 pb-3">
-            <div className="font-medium text-gray-900">
-              Should I ask questions publicly or privately?
-            </div>
-            <div className="text-sm text-gray-600">
-              Prefer public questions when possible. Public Q&amp;A is
-              searchable later, so other people can solve the same problem
-              without needing to DM you.
-            </div>
-          </div>
-
-          <div className="border-b border-gray-200 pb-3">
-            <div className="font-medium text-gray-900">
-              What if my answer is not perfect?
-            </div>
-            <div className="text-sm text-gray-600">
-              That’s okay. You can edit or add an update. Other people can also
-              contribute. The goal is to help someone move forward, not to be
-              100% perfect in one shot.
-            </div>
-          </div>
-
-          <div className="border-b border-gray-200 pb-3">
-            <div className="font-medium text-gray-900">
-              Who can see my points?
-            </div>
-            <div className="text-sm text-gray-600">
-              Your points usually appear in the leaderboard. The leaderboard is
-              basically a “most helpful teammates right now” board.
-            </div>
-          </div>
         </div>
-      </section>
+      </FlowIn>
 
       {/* Footer / encouragement */}
-      <section className="text-center text-xs text-gray-500 pb-10">
+      <FlowIn as="section" className="text-center text-xs text-gray-500 pb-10" delay={280}>
         You’re ready. Ask something, or answer something. Your knowledge saves
         someone else’s time 🚀
-      </section>
+      </FlowIn>
     </div>
   )
 }

@@ -14,8 +14,8 @@ const within30m = (iso) =>
 function Toast({ show, children }) {
   if (!show) return null
   return (
-    <div className="fixed top-4 right-4 z-50">
-      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-700 shadow px-4 py-2">
+    <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-2">
+      <div className="rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg px-4 py-2 backdrop-blur-sm">
         {children}
       </div>
     </div>
@@ -53,6 +53,79 @@ function qs(params) {
   })
   const s = sp.toString()
   return s ? `?${s}` : ''
+}
+
+
+function FancyHoverButton({
+  mainText = 'Hover me',
+  hoverText = 'Thank you!',
+  onClick,
+  className = '',
+  color = 'red', // 'red' | 'indigo' | 'emerald' | 'gray'
+  disabled = false,
+}) {
+  const palette = {
+    red:     { text: 'text-red-500',     border: 'border-red-500' },
+    indigo:  { text: 'text-indigo-600',  border: 'border-indigo-600' },
+    emerald: { text: 'text-emerald-600', border: 'border-emerald-600' },
+    gray:    { text: 'text-gray-700',    border: 'border-gray-700' },
+  }[color] || { text: 'text-red-500', border: 'border-red-500' }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        'group relative mt-0 p-5 cursor-pointer flex items-center justify-center',
+        'bg-transparent text-xl font-normal border-0 h-auto w-[170px] overflow-hidden',
+        'transition-all duration-100',
+        palette.text,
+        disabled ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-100',
+        className,
+      ].join(' ')}
+      aria-label={mainText}
+    >
+      {/* Left rail */}
+      <span
+        className={[
+          'absolute left-0 h-full w-5',
+          'border-y border-l',
+          palette.border,
+          'transition-all duration-500',
+          'group-hover:w-full',
+        ].join(' ')}
+      />
+      {/* Texts */}
+      <p
+        className={[
+          'absolute translate-x-0 transition-all duration-200',
+          'group-hover:opacity-0',
+          'group-hover:-translate-x-full',
+        ].join(' ')}
+      >
+        {mainText}
+      </p>
+      <span
+        className={[
+          'absolute translate-x-full opacity-0 transition-all duration-200',
+          'group-hover:translate-x-0 group-hover:opacity-100',
+        ].join(' ')}
+      >
+        {hoverText}
+      </span>
+      {/* Right rail */}
+      <span
+        className={[
+          'absolute right-0 h-full w-5',
+          'border-y border-r',
+          palette.border,
+          'transition-all duration-500',
+          'group-hover:w-full',
+        ].join(' ')}
+      />
+    </button>
+  )
 }
 
 export default function Dashboard() {
@@ -166,103 +239,127 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-6xl mx-auto p-4">
+      {/* Keep existing background color — enhance only components */}
       <QuizPopup />
 
       <Toast show={!!postedInfo}>{postedInfo}</Toast>
 
-      {/* Department filter */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <label htmlFor="dept" className="text-sm font-medium">Filter by department</label>
-        <select
-          id="dept"
-          value={selectedDept}
-          onChange={(e) => setSelectedDept(e.target.value)}
-          className="w-full max-w-xs rounded-xl border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          disabled={loadingDepts}
-        >
-          <option value="">All departments</option>
-          {departments.map((d) => (
-            <option key={d} value={d}>{d}</option>
-          ))}
-        </select>
-        {hasDeptFilter && (
-          <span className="text-xs text-gray-600">Showing posts from <b>{selectedDept}</b></span>
-        )}
+      {/* Page header */}
+      <div className="mb-4 rounded-2xl border bg-white/60 backdrop-blur-sm px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h1 className="text-lg font-semibold tracking-tight">Dashboard</h1>
+          {/* Department filter */}
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="dept" className="text-sm font-medium">Filter by department</label>
+            <select
+              id="dept"
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="w-full max-w-xs rounded-xl border border-gray-300 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 transition"
+              disabled={loadingDepts}
+            >
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+            {hasDeptFilter && (
+              <span className="text-xs text-gray-600">Showing posts from <b>{selectedDept}</b></span>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
         {/* LEFT / MAIN COLUMN */}
-        <div className="md:col-span-2">
-          <div className="bg-white p-4 rounded-xl shadow">
-            <h2 className="font-bold text-lg mb-2">Ask a Question</h2>
-
-            <input
-              className="w-full border p-2 rounded mb-2"
-              placeholder="Title"
-              value={title}
-              onChange={e => onTitleChange(e.target.value)}
-            />
-
-            {suggest.length > 0 && (
-              <div className="text-xs text-gray-600 mb-2">
-                Similar:{' '}
-                {suggest.map(s => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => window.location.assign(`/questions/${s.id}`)}
-                    className="mr-2 text-blue-600 hover:underline"
-                  >
-                    #{s.title}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <textarea
-              className="w-full border p-2 rounded mb-2"
-              rows="3"
-              placeholder="Body"
-              value={body}
-              onChange={e => setBody(e.target.value)}
-            />
-
-            <input
-              className="w-full border p-2 rounded mb-2"
-              placeholder="tags (comma separated, e.g. Python, Django)"
-              value={tags}
-              onChange={e => setTags(e.target.value)}
-            />
-
-            <div className="flex flex-col gap-2 text-sm mb-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={postAnonymous}
-                  onChange={e => setPostAnonymous(e.target.checked)}
-                />
-                <span>Post anonymously (hide my name)</span>
-              </label>
-
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={urgent}
-                  onChange={e => setUrgent(e.target.checked)}
-                />
-                <span>Urgent</span>
-              </label>
+        <div className="md:col-span-2 space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm ring-1 ring-gray-100">
+            <div className="px-4 py-3 border-b">
+              <h2 className="font-semibold">Ask a Question</h2>
             </div>
+            <div className="p-4">
+              <input
+                className="w-full border rounded-xl px-3 py-2 mb-3 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Title"
+                value={title}
+                onChange={e => onTitleChange(e.target.value)}
+              />
 
-            <button
-              onClick={post}
-              className="bg-blue-600 text-white px-4 py-2 rounded"
-            >
-              Post
-            </button>
+              {suggest.length > 0 && (
+                <div className="text-xs text-gray-600 mb-3">
+                  <span className="mr-2">Similar:</span>
+                  {suggest.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => window.location.assign(`/questions/${s.id}`)}
+                      className="mr-2 text-blue-600 hover:underline underline-offset-2"
+                    >
+                      #{s.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <textarea
+                className="w-full border rounded-xl px-3 py-2 mb-3 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                rows="3"
+                placeholder="Body"
+                value={body}
+                onChange={e => setBody(e.target.value)}
+              />
+
+              <input
+                className="w-full border rounded-xl px-3 py-2 mb-3 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="tags (comma separated, e.g. Python, Django)"
+                value={tags}
+                onChange={e => setTags(e.target.value)}
+              />
+
+              <div className="flex flex-col gap-2 text-sm mb-4">
+                <label className="flex items-center gap-2 select-none">
+                  <input
+                    type="checkbox"
+                    checked={postAnonymous}
+                    onChange={e => setPostAnonymous(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Post anonymously <span className="text-gray-400">(hide my name)</span></span>
+                </label>
+
+                <label className="flex items-center gap-2 select-none">
+                  <input
+                    type="checkbox"
+                    checked={urgent}
+                    onChange={e => setUrgent(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                  />
+                  <span className="inline-flex items-center gap-2">
+                    Urgent
+                    {urgent && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">will notify</span>
+                    )}
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {/* ▼ ここを FancyHoverButton に置き換え */}
+                <FancyHoverButton
+                  mainText="Post"
+                  hoverText="Send it"
+                  onClick={post}
+                  color="red"      // 'red' | 'indigo' | 'emerald' | 'gray'
+                  className=""     // 追加カスタムがあれば
+                />
+                <span className="text-xs text-gray-500">
+                  Be clear and include tags so the right folks see it
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="space-y-3">
             {questions.map(q => (
               <QuestionCard
                 key={q.id}
@@ -276,7 +373,7 @@ export default function Dashboard() {
         </div>
 
         {/* RIGHT SIDEBAR */}
-        <div>
+        <div className="space-y-4">
           <PointsWidget />
           <Leaderboard />
           <Notifications />
@@ -413,18 +510,14 @@ function QuestionCard({ q, meUsername, meUserId, onDeleted }) {
   }
 
   return (
-    <div className="bg-white p-4 rounded-xl shadow">
-      <div className="flex items-center justify-between">
+    <div className="bg-white rounded-2xl shadow-sm ring-1 ring-gray-100 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2 flex-wrap">
           {q.urgent && (
-            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
-              URGENT
-            </span>
+            <span className="text-[11px] font-medium bg-red-50 text-red-700 px-2 py-0.5 rounded-full border border-red-200">URGENT</span>
           )}
           {assignedLabel && (
-            <span className="text-xs px-2 py-0.5 rounded border">
-              {assignedLabel}
-            </span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-gray-50">{assignedLabel}</span>
           )}
           <button
             className="font-semibold text-lg hover:underline text-left"
@@ -444,149 +537,152 @@ function QuestionCard({ q, meUsername, meUserId, onDeleted }) {
         )}
       </div>
 
-      <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-        <span>Posted: {fmt(q.created_at)}</span>
-        <span>•</span>
-        <span>By {authorName}</span>
-      </div>
+      <div className="px-4 py-3">
+        <div className="text-xs text-gray-500 flex flex-wrap gap-2">
+          <span>Posted: {fmt(q.created_at)}</span>
+          <span>•</span>
+          <span>By {authorName}</span>
+        </div>
 
-      <div className="text-gray-600 text-sm my-2 whitespace-pre-wrap">
-        {q.body}
-      </div>
+        <div className="text-gray-700 text-sm my-3 whitespace-pre-wrap">
+          {q.body}
+        </div>
 
-      <div className="text-xs text-gray-500 mb-2">
-        {q.tags.map(t => (
-          <span key={t.id || t.name} className="mr-2">
-            #{t.name || t}
-          </span>
-        ))}
-      </div>
+        <div className="text-xs text-gray-500 mb-3">
+          {q.tags.map(t => (
+            <span key={t.id || t.name} className="mr-2 inline-flex items-center gap-1">
+              <span className="text-gray-300">#</span>{t.name || t}
+            </span>
+          ))}
+        </div>
 
-      {/* Answers list */}
-      <div className="space-y-2">
-        {answers.map(a => {
-          const isMine = meUsername && a.author && a.author.username === meUsername
-          const canEditDel = isMine && within30m(a.created_at)
-          const likeCount = likes[a.id] ?? a.like_count
-          return (
-            <div
-              key={a.id}
-              className={`border rounded p-2 ${
-                q.best_answer_id === a.id
-                  ? 'border-green-500'
-                  : 'border-gray-200'
-              }`}
-            >
-              {editingId === a.id ? (
-                <div className="space-y-2">
-                  <textarea
-                    className="w-full border rounded p-2"
-                    rows="3"
-                    value={editText}
-                    onChange={e => setEditText(e.target.value)}
-                  />
-                  <div className="flex gap-2 text-sm">
-                    <button
-                      onClick={saveEdit}
-                      className="bg-blue-600 text-white px-3 py-1 rounded"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={cancelEdit}
-                      className="border px-3 py-1 rounded"
-                    >
-                      Cancel
-                    </button>
+        {/* Answers list */}
+        <div className="space-y-2">
+          {answers.map(a => {
+            const isMine = meUsername && a.author && a.author.username === meUsername
+            const canEditDel = isMine && within30m(a.created_at)
+            const likeCount = likes[a.id] ?? a.like_count
+            return (
+              <div
+                key={a.id}
+                className={`border rounded-xl p-3 transition ${
+                  q.best_answer_id === a.id
+                    ? 'border-green-500 bg-green-50/50'
+                    : 'border-gray-200 bg-white'
+                }`}
+              >
+                {editingId === a.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      className="w-full border rounded-xl p-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                      rows="3"
+                      value={editText}
+                      onChange={e => setEditText(e.target.value)}
+                    />
+                    <div className="flex gap-2 text-sm">
+                      <button
+                        onClick={saveEdit}
+                        className="bg-blue-600 text-white px-3 py-1 rounded-lg"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        className="border px-3 py-1 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <>
-                  <div className="text-sm whitespace-pre-wrap">{a.body}</div>
-                  <div className="text-[11px] text-gray-500 mt-1">
-                    Answered: {fmt(a.created_at)}
-                  </div>
-                  <div className="text-xs text-gray-500 flex flex-wrap gap-3 mt-1 items-center">
-                    <button
-                      onClick={() => like(a.id)}
-                      className="hover:underline"
-                    >
-                      Like ({likeCount})
-                    </button>
-                    <button
-                      onClick={() => markBest(a.id)}
-                      className="hover:underline"
-                    >
-                      Mark Best
-                    </button>
-                    {canEditDel && (
-                      <>
-                        <span className="text-gray-300">|</span>
-                        <button
-                          onClick={() => startEdit(a)}
-                          className="hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => removeAnswer(a.id)}
-                          className="text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        })}
+                ) : (
+                  <>
+                    <div className="text-sm whitespace-pre-wrap">{a.body}</div>
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Answered: {fmt(a.created_at)}
+                    </div>
+                    <div className="text-xs text-gray-600 flex flex-wrap gap-3 mt-2 items-center">
+                      <button
+                        onClick={() => like(a.id)}
+                        className="hover:underline inline-flex items-center gap-1"
+                      >
+                        <span>Like</span>
+                        <span className="font-semibold">({likeCount})</span>
+                      </button>
+                      <button
+                        onClick={() => markBest(a.id)}
+                        className="hover:underline"
+                      >
+                        Mark Best
+                      </button>
+                      {canEditDel && (
+                        <>
+                          <span className="text-gray-300">|</span>
+                          <button
+                            onClick={() => startEdit(a)}
+                            className="hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => removeAnswer(a.id)}
+                            className="text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Guards */}
+        {isAssignedGuardActive && (
+          <div className="mt-3 text-sm rounded-xl bg-orange-50 border border-orange-200 text-orange-700 px-3 py-2">
+            Only <b>@{assigned.username}</b> can answer this question.
+          </div>
+        )}
+        {isOwnerQ && (
+          <div className="mt-3 text-sm rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2">
+            You can't answer your own question.
+          </div>
+        )}
+
+        {/* Answer input */}
+        <div className="mt-3 flex gap-2">
+          <input
+            className="flex-1 border rounded-xl px-3 py-2 shadow-sm outline-none disabled:bg-gray-100 focus:ring-2 focus:ring-gray-800"
+            placeholder="Write an answer..."
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            disabled={isAnswerDisabled}
+          />
+          <button
+            onClick={submit}
+            className={`px-3 rounded-xl text-white transition shadow-sm active:scale-[0.99] ${
+              isAnswerDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-800 hover:shadow-md'
+            }`}
+            disabled={isAnswerDisabled}
+          >
+            Send
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="mt-3 text-sm rounded-xl bg-red-50 border border-red-200 text-red-700 px-3 py-2">
+            {errorMsg}
+          </div>
+        )}
+
+        {sentOK && (
+          <div className="mt-3 text-sm rounded-xl bg-green-50 border border-green-200 text-green-700 px-3 py-2">
+            Thanks for your answer!
+          </div>
+        )}
       </div>
-
-      {/* Guards */}
-      {isAssignedGuardActive && (
-        <div className="mt-2 text-sm rounded bg-orange-50 border border-orange-200 text-orange-700 px-3 py-2">
-          Only <b>@{assigned.username}</b> can answer this question.
-        </div>
-      )}
-      {isOwnerQ && (
-        <div className="mt-2 text-sm rounded bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2">
-          You can't answer your own question.
-        </div>
-      )}
-
-      {/* Answer input */}
-      <div className="mt-2 flex gap-2">
-        <input
-          className="flex-1 border p-2 rounded disabled:bg-gray-100"
-          placeholder="Write an answer..."
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          disabled={isAnswerDisabled}
-        />
-        <button
-          onClick={submit}
-          className={`px-3 rounded text-white ${
-            isAnswerDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-800'
-          }`}
-          disabled={isAnswerDisabled}
-        >
-          Send
-        </button>
-      </div>
-
-      {errorMsg && (
-        <div className="mt-2 text-sm rounded bg-red-50 border border-red-200 text-red-700 px-3 py-2">
-          {errorMsg}
-        </div>
-      )}
-
-      {sentOK && (
-        <div className="mt-2 text-sm rounded bg-green-50 border border-green-200 text-green-700 px-3 py-2">
-          Thanks for your answer!
-        </div>
-      )}
     </div>
   )
 }
@@ -609,30 +705,32 @@ function PointsWidget() {
   }
 
   return (
-    <div className="bg-white p-4 rounded-xl shadow mb-4">
-      <div className="font-semibold mb-2">My Points</div>
-      <div className="text-3xl font-bold">{bal}</div>
-      <div className="mt-3 flex gap-2">
-        <input
-          className="border rounded p-2 flex-1"
-          placeholder="Points to use"
-          value={amt}
-          onChange={e => setAmt(e.target.value)}
-        />
-        <button
-          onClick={redeem}
-          className="bg-green-600 text-white px-3 rounded"
-        >
-          Redeem
-        </button>
+    <div className="bg-white rounded-2xl shadow-sm ring-1 ring-gray-100">
+      <div className="px-4 py-3 border-b font-semibold">My Points</div>
+      <div className="p-4">
+        <div className="text-3xl font-bold">{bal}</div>
+        <div className="mt-3 flex gap-2">
+          <input
+            className="border rounded-xl px-3 py-2 flex-1 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Points to use"
+            value={amt}
+            onChange={e => setAmt(e.target.value)}
+          />
+          <button
+            onClick={redeem}
+            className="bg-green-600 text-white px-3 rounded-xl shadow-sm hover:shadow-md active:scale-[0.99]"
+          >
+            Redeem
+          </button>
+        </div>
+        {qr && (
+          <img
+            src={qr}
+            className="mt-3 w-full rounded-xl border"
+            alt="redeem qr"
+          />
+        )}
       </div>
-      {qr && (
-        <img
-          src={qr}
-          className="mt-3 w-full rounded"
-          alt="redeem qr"
-        />
-      )}
     </div>
   )
 }
@@ -645,16 +743,18 @@ function Leaderboard() {
   }, [])
 
   return (
-    <div className="bg-white p-4 rounded-xl shadow mb-4">
-      <div className="font-semibold mb-2">Department Leaderboard</div>
-      <ul className="text-sm">
-        {rows.map((r, i) => (
-          <li key={i} className="flex justify-between py-1">
-            <span>{i + 1}. {r.department}</span>
-            <span className="font-semibold">{r.points}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="bg-white rounded-2xl shadow-sm ring-1 ring-gray-100">
+      <div className="px-4 py-3 border-b font-semibold">Department Leaderboard</div>
+      <div className="p-4">
+        <ul className="text-sm">
+          {rows.map((r, i) => (
+            <li key={i} className="flex justify-between py-2 border-b last:border-b-0">
+              <span className="truncate"><span className="text-gray-400 mr-1">{i + 1}.</span> {r.department}</span>
+              <span className="font-semibold">{r.points}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }
@@ -704,8 +804,8 @@ function Notifications() {
   })
 
   return (
-    <div className="bg-white p-4 rounded-xl shadow">
-      <div className="flex items-center justify-between mb-2">
+    <div className="bg-white rounded-2xl shadow-sm ring-1 ring-gray-100">
+      <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="font-semibold">Notifications</div>
         <button
           onClick={markAllRead}
@@ -715,54 +815,58 @@ function Notifications() {
         </button>
       </div>
 
-      <div className="flex items-center gap-4 text-sm mb-3">
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={onlyUrgentWithTags}
-            onChange={e => setOnlyUrgentWithTags(e.target.checked)}
-          />
-          Urgent + related hashtags
-        </label>
+      <div className="p-4">
+        <div className="flex items-center gap-4 text-sm mb-3">
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={onlyUrgentWithTags}
+              onChange={e => setOnlyUrgentWithTags(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+            />
+            Urgent + related hashtags
+          </label>
 
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={onlyPrivateAssigned}
-            onChange={e => setOnlyPrivateAssigned(e.target.checked)}
-          />
-          Private/assigned only
-        </label>
-      </div>
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={onlyPrivateAssigned}
+              onChange={e => setOnlyPrivateAssigned(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            Private/assigned only
+          </label>
+        </div>
 
-      <ul className="text-sm space-y-2">
-        {filtered.map(n => (
-          <li
-            key={n.id}
-            className={`border rounded p-2 ${n.read ? 'bg-white' : 'bg-blue-50'} cursor-pointer hover:bg-blue-100`}
-            onClick={() => { if (n.question_id) nav(`/questions/${n.question_id}`) }}
-            title={n.question_id ? 'Open question' : undefined}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div>{n.message}</div>
-                <div className="mt-1 flex items-center gap-2 flex-wrap">
-                  {String(n.message || '').startsWith('You were assigned') && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border">private</span>
-                  )}
-                  {String(n.message || '').startsWith('URGENT:') && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">urgent</span>
-                  )}
-                  {n.question_id && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border">question #{n.question_id}</span>
-                  )}
+        <ul className="text-sm space-y-2">
+          {filtered.map(n => (
+            <li
+              key={n.id}
+              className={`border rounded-xl p-3 transition ${n.read ? 'bg-white' : 'bg-blue-50'} cursor-pointer hover:bg-blue-100`}
+              onClick={() => { if (n.question_id) nav(`/questions/${n.question_id}`) }}
+              title={n.question_id ? 'Open question' : undefined}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div>{n.message}</div>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    {String(n.message || '').startsWith('You were assigned') && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full border">private</span>
+                    )}
+                    {String(n.message || '').startsWith('URGENT:') && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-red-300 bg-red-50 text-red-700">urgent</span>
+                    )}
+                    {n.question_id && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full border">question #{n.question_id}</span>
+                    )}
+                  </div>
                 </div>
+                <div className="shrink-0 text-[11px] text-gray-500">{fmt(n.created_at)}</div>
               </div>
-              <div className="shrink-0 text-[11px] text-gray-500">{fmt(n.created_at)}</div>
-            </div>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }
