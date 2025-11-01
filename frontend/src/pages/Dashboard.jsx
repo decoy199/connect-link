@@ -347,7 +347,7 @@ export default function Dashboard() {
                 {/* ▼ ここを FancyHoverButton に置き換え */}
                 <FancyHoverButton
                   mainText="Post"
-                  hoverText="Send it"
+                  hoverText="Nice question!"
                   onClick={post}
                   color="red"      // 'red' | 'indigo' | 'emerald' | 'gray'
                   className=""     // 追加カスタムがあれば
