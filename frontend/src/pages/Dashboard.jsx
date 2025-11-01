@@ -344,13 +344,13 @@ export default function Dashboard() {
               </div>
 
               <div className="flex items-center gap-3">
-                {/* ▼ ここを FancyHoverButton に置き換え */}
+                {/* */}
                 <FancyHoverButton
                   mainText="Post"
                   hoverText="Nice question!"
                   onClick={post}
                   color="red"      // 'red' | 'indigo' | 'emerald' | 'gray'
-                  className=""     // 追加カスタムがあれば
+                  className=""     // 
                 />
                 <span className="text-xs text-gray-500">
                   Be clear and include tags so the right folks see it
